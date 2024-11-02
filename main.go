@@ -368,7 +368,7 @@ func main() {
 		fmt.Printf("Chained Value %d:\n", i+1)
 		fmt.Printf("  Value: %s\n", chainedValue.Value)
 		fmt.Println("  Context:")
-		for _, ref := range chainedValue.Context {
+		for _, ref := range chainedValue.AllUsages {
 			var requestOrResponse string
 			if ref.SourceType == SourceTypeRequest {
 				requestOrResponse = "Request"
@@ -397,7 +397,8 @@ func main() {
 
 type ChainedValueContext struct {
 	Value        string
-	Context      []*ValueReference
+	AllUsages    []*ValueReference
+	ValueSource  *ValueReference
 	VariableName string
 }
 
@@ -430,8 +431,8 @@ func FindChainedValues(callDetailsList []*CallDetails) []*ChainedValueContext {
 	for value, refs := range valueOccurrences {
 		if len(refs) > 1 {
 			chainedValues = append(chainedValues, &ChainedValueContext{
-				Value:   value,
-				Context: refs,
+				Value:     value,
+				AllUsages: refs,
 			})
 		}
 	}
@@ -445,7 +446,7 @@ NextChainedValue:
 		//var seenRequest bool
 		var seenResponse bool
 		includeVal := false
-		for _, contextItem := range chainedValue.Context {
+		for _, contextItem := range chainedValue.AllUsages {
 			if contextItem.SourceType == SourceTypeRequest {
 				if !seenResponse {
 					continue NextChainedValue
@@ -466,7 +467,7 @@ NextChainedValue:
 
 func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 	for _, chainedValue := range chainedValues {
-		for _, contextItem := range chainedValue.Context {
+		for _, contextItem := range chainedValue.AllUsages {
 			if contextItem.Source != nil {
 				if contextItem.SourceType == SourceTypeRequest {
 					contextItem.Context = chainedValue
@@ -474,6 +475,9 @@ func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 				} else {
 					contextItem.Context = chainedValue
 					contextItem.Source.ResponseChainedValues = append(contextItem.Source.ResponseChainedValues, contextItem)
+					if chainedValue.ValueSource == nil {
+						chainedValue.ValueSource = contextItem
+					}
 				}
 			} else {
 				log.Printf("Source is nil for value: %s, type %v", chainedValue.Value, contextItem.SourceType)

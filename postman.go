@@ -22,8 +22,9 @@ type CollectionInfo struct {
 }
 
 type PostmanVariable struct {
-	Key   string `json:"key"`
-	Value string `json:"value"`
+	Key         string `json:"key"`
+	Value       string `json:"value"`
+	Description string `json:"description,omitempty"`
 }
 
 type PostmanItem struct {
@@ -275,6 +276,7 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 		variables[i] = PostmanVariable{
 			Key: chainedValue.VariableName,
 			//Value: fmt.Sprintf("%v", chainedValue.Value),
+			Description: chainedValue.ValueSource.JavascriptReference,
 		}
 	}
 
