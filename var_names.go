@@ -66,7 +66,8 @@ func AssignVariableNames(chainedValues []*ChainedValueContext) {
 			Role: "user",
 			Content: fmt.Sprintf(
 				`I want you to come up with good variable names for values retrieved from an API.
-Please ensure each variable name is descriptive and follows best practices and is unique.
+Please ensure each variable name is descriptive and follows best practices and is unique, but don't be overly verbose.
+Don't include things like "identifier" or "value" in the name unless it's critical to the nameing, just the most descriptive part as a human would name it.
 
 I'm giving you the URL that was called and the response JSON path that the value is retrieved from.
 
