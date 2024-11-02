@@ -64,11 +64,17 @@ func AssignVariableNames(chainedValues []*ChainedValueContext) {
 		},
 		{
 			Role: "user",
-			Content: fmt.Sprintf(`I want you to come up with good variable names for values retrieved from an API. I'm giving you the URL that was called and the response JSON path that the value is retrieved from.
+			Content: fmt.Sprintf(
+				`I want you to come up with good variable names for values retrieved from an API.
+Please ensure each variable name is descriptive and follows best practices and is unique.
+
+I'm giving you the URL that was called and the response JSON path that the value is retrieved from.
 
 The API is: Travelport JSON API.
 
-The response should be a JSON array of strings with each result corresponding to the name to give the variable to hold the value. Please only return the JSON and nothing else with no additional formatting or content.
+The response should be a JSON array of strings with each result corresponding to the name to
+give the variable to hold the value. Please only return the JSON and nothing else with no additional
+formatting or content.
 
 Here's what I need names for: %s`, string(jsonData)),
 		},
@@ -103,6 +109,9 @@ Here's what I need names for: %s`, string(jsonData)),
 	if err != nil {
 		log.Fatalf("Error reading response body: %v", err)
 	}
+
+	// Log the response
+	log.Printf("Response: %s", respBody)
 
 	// Parse OpenAI response
 	var openAIResponse OpenAIResponse
