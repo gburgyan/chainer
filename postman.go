@@ -82,15 +82,6 @@ type PostmanEventScript struct {
 	Exec []string `json:"exec"`
 }
 
-func AssignVariableNames(chainedValues []*ChainedValueContext) {
-	var variableNameCounter int
-	for _, value := range chainedValues {
-		variableName := fmt.Sprintf("var_%d", variableNameCounter)
-		value.VariableName = variableName
-		variableNameCounter++
-	}
-}
-
 func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	// Replace chained values in the request URL
 	requestUrl := BuildPostmanURL(request)
@@ -242,8 +233,6 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 
 func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*ChainedValueContext) PostmanCollection {
 	var items []PostmanItem
-
-	AssignVariableNames(chainedValues)
 
 	for _, callDetails := range callDetailsList {
 		if callDetails == nil {

@@ -382,6 +382,8 @@ func main() {
 
 	repopulateCallDetails(chainedValues)
 
+	AssignVariableNames(chainedValues)
+
 	// Build the Postman collection
 	collection := BuildPostmanCollection(callDetailsList, chainedValues)
 
