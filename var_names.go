@@ -9,25 +9,6 @@ type VariableNameGenerator struct {
 	ResponsePath     string `json:"response_path"`
 }
 
-type OpenAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-type OpenAIRequest struct {
-	Model     string          `json:"model"`
-	Messages  []OpenAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
-}
-
-type OpenAIChoice struct {
-	Message OpenAIMessage `json:"message"`
-}
-
-type OpenAIResponse struct {
-	Choices []OpenAIChoice `json:"choices"`
-}
-
 func AssignVariableNames(chainedValues []*ChainedValueContext) {
 
 	var variableNames []VariableNameGenerator

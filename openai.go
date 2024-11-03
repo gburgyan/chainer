@@ -9,6 +9,25 @@ import (
 	"os"
 )
 
+type OpenAIMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type OpenAIRequest struct {
+	Model     string          `json:"model"`
+	Messages  []OpenAIMessage `json:"messages"`
+	MaxTokens int             `json:"max_tokens"`
+}
+
+type OpenAIChoice struct {
+	Message OpenAIMessage `json:"message"`
+}
+
+type OpenAIResponse struct {
+	Choices []OpenAIChoice `json:"choices"`
+}
+
 func CallOpenAI[T any](prompt string, input []T) ([]string, error) {
 	// Get the API key from the environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
