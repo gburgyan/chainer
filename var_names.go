@@ -9,7 +9,7 @@ type VariableNameGenerator struct {
 	ResponsePath     string `json:"response_path"`
 }
 
-func AssignVariableNames(chainedValues []*ChainedValueContext) {
+func assignVariableNames(chainedValues []*ChainedValueContext) {
 
 	var variableNames []VariableNameGenerator
 	for _, value := range chainedValues {
