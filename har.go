@@ -73,7 +73,8 @@ type Content struct {
 	// Other fields can be added as needed
 }
 
-// FlattenJSON takes a JSON string and returns a slice of ValueReference with JavaScript-like paths.
+// FlattenJSON parses a JSON string and returns a flat list of ValueReference instances.
+// Each ValueReference includes the value and its JavaScript-like reference path within the JSON structure.
 func FlattenJSON(data string) ([]*ValueReference, error) {
 	var jsonData interface{}
 	if err := json.Unmarshal([]byte(data), &jsonData); err != nil {
@@ -84,7 +85,8 @@ func FlattenJSON(data string) ([]*ValueReference, error) {
 	return valueRefs, nil
 }
 
-// flatten is a helper function that recursively flattens JSON data into ValueReference slices.
+// flatten is a helper function for FlattenJSON.
+// It recursively traverses the JSON data structure and accumulates ValueReference instances with updated reference paths.
 func flatten(prefix string, data interface{}, valueRefs *[]*ValueReference) {
 	switch v := data.(type) {
 	case map[string]interface{}:
@@ -111,7 +113,8 @@ func flatten(prefix string, data interface{}, valueRefs *[]*ValueReference) {
 	}
 }
 
-// ExtractURLStrings parses the URL and extracts path segments and query parameter values.
+// ExtractURLStrings parses a raw URL string to extract path segments and query parameter values.
+// It converts these components into ValueReference instances with appropriate reference paths.
 func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -151,7 +154,9 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	return valueRefs, nil
 }
 
-// processBody processes the body string, assuming it's JSON, and returns a slice of ValueReference.
+// processBody processes the body of an HTTP request or response.
+// It assumes the body is in JSON format and flattens it using FlattenJSON.
+// It returns a slice of ValueReference instances representing the data in the body.
 func processBody(body string) ([]*ValueReference, error) {
 	// Check if body is empty
 	if strings.TrimSpace(body) == "" {
@@ -167,8 +172,8 @@ func processBody(body string) ([]*ValueReference, error) {
 	return flatRefs, nil
 }
 
-// processHeaders processes headers and returns a slice of ValueReference.
-// This function is optional and can be used if you want to include headers in CallDetails.
+// processHeaders processes HTTP headers and converts them into ValueReference instances.
+// It handles special cases like stripping tokens from authorization headers.
 func processHeaders(headers []Header) []*ValueReference {
 	var headerRefs []*ValueReference
 	for _, header := range headers {
@@ -185,6 +190,9 @@ func processHeaders(headers []Header) []*ValueReference {
 	return headerRefs
 }
 
+// processHar iterates over each entry in the HAR log.
+// It extracts and processes request and response details, including URLs, headers, and bodies.
+// It collects ValueReference instances for both requests and responses and assembles a list of CallDetails.
 func processHar(har HAR) []*CallDetails {
 	// Slice to keep track of all CallDetails
 	var callDetailsList []*CallDetails
@@ -254,6 +262,8 @@ func processHar(har HAR) []*CallDetails {
 	return callDetailsList
 }
 
+// readHar reads the HAR file from the specified path.
+// It unmarshals the JSON content into a HAR struct and returns any errors encountered.
 func readHar(harFilePath string) (error, HAR) {
 	// Read the HAR file
 	harData, err := os.ReadFile(harFilePath)

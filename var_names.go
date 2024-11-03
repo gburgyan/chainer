@@ -9,6 +9,9 @@ type VariableNameGenerator struct {
 	ResponsePath     string `json:"response_path"`
 }
 
+// assignVariableNames assigns descriptive variable names to each chained value.
+// It prepares input data based on the origin request URL and response path of each value.
+// It calls the OpenAI API to generate meaningful names following best practices and updates each ChainedValueContext.
 func assignVariableNames(chainedValues []*ChainedValueContext) {
 
 	var variableNames []VariableNameGenerator

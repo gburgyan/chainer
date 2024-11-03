@@ -82,6 +82,8 @@ type PostmanEventScript struct {
 	Exec []string `json:"exec"`
 }
 
+// ReplaceChainedValuesInRequest constructs a PostmanRequest for inclusion in the Postman collection.
+// It replaces occurrences of chained values in the request URL, headers, and body with Postman variable placeholders.
 func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	// Replace chained values in the request URL
 	requestUrl := BuildPostmanURL(request)
@@ -112,6 +114,8 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	return postmanRequest
 }
 
+// ReplaceValuesInString replaces all occurrences of specified values in an input string with corresponding Postman variable placeholders.
+// It iterates over the provided ValueReference instances to perform the substitutions.
 func ReplaceValuesInString(input string, valueToVariableName []*ValueReference) string {
 	for _, v := range valueToVariableName {
 		valueString := fmt.Sprintf("%v", v.Value)
@@ -125,6 +129,8 @@ func ReplaceValuesInString(input string, valueToVariableName []*ValueReference) 
 	return input
 }
 
+// BuildPostmanURL builds a PostmanURL struct for a Postman request.
+// It parses the original request URL and replaces path segments and query parameters that match chained values with variable placeholders.
 func BuildPostmanURL(callDetails *CallDetails) PostmanURL {
 	rawUrl := callDetails.Entry.Request.URL
 
@@ -179,6 +185,8 @@ func BuildPostmanURL(callDetails *CallDetails) PostmanURL {
 	return postmanURL
 }
 
+// CreateTestScript generates a Postman test script event to extract values from responses.
+// It creates JavaScript code that retrieves values from the response JSON and sets them as collection variables.
 func CreateTestScript(chainedValues []*ValueReference) PostmanEvent {
 	var scriptLines []string
 	scriptLines = append(scriptLines, "var responseJson = pm.response.json();")
@@ -210,6 +218,8 @@ func CreateTestScript(chainedValues []*ValueReference) PostmanEvent {
 	}
 }
 
+// buildScriptForVariable constructs JavaScript code snippets for extracting a single variable from the response.
+// It includes error handling and sets the extracted value as a Postman collection variable.
 func buildScriptForVariable(chainedValue *ValueReference) []string {
 	var scriptLines []string
 	collectionVarName := chainedValue.Context.VariableName
@@ -231,6 +241,9 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 	return scriptLines
 }
 
+// BuildPostmanCollection assembles the complete Postman collection.
+// It iterates over the processed call details to create Postman items (requests).
+// It incorporates variable replacements and test scripts into each item and adds collection variables.
 func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*ChainedValueContext) PostmanCollection {
 	var items []PostmanItem
 
@@ -287,6 +300,8 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 	return collection
 }
 
+// WriteCollectionToFile serializes the Postman collection into JSON format with proper indentation.
+// It writes the JSON data to the specified filename and returns any errors encountered.
 func WriteCollectionToFile(collection PostmanCollection, filename string) error {
 	data, err := json.MarshalIndent(collection, "", "  ")
 	if err != nil {

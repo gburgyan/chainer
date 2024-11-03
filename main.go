@@ -10,6 +10,17 @@ import (
 
 type SourceType int
 
+type CallDetails struct {
+	RequestDetails  []*ValueReference `json:"request_details"`
+	ResponseDetails []*ValueReference `json:"response_details"`
+
+	// TODO: An Entry should be more generic and not tied to HAR.
+	Entry *Entry `json:"entry"`
+
+	RequestChainedValues  []*ValueReference `json:"request_chained_values"`
+	ResponseChainedValues []*ValueReference `json:"response_chained_values"`
+}
+
 const (
 	SourceTypeRequest SourceType = iota
 	SourceTypeResponse
@@ -34,6 +45,9 @@ type ChainedValueContext struct {
 	VariableName string
 }
 
+// IsInteresting determines whether a ValueReference is significant for chaining.
+// It filters out values that are nil, too short (for strings), or below a threshold (for numbers).
+// It also excludes specific headers and JSON properties that are not useful for variable substitution.
 func (r *ValueReference) IsInteresting() bool {
 	if r.Value == nil {
 		return false
@@ -62,17 +76,9 @@ func (r *ValueReference) IsInteresting() bool {
 	return false
 }
 
-// CallDetails holds the processed details for a single HAR entry, separating requests and responses.
-type CallDetails struct {
-	RequestDetails  []*ValueReference `json:"request_details"`
-	ResponseDetails []*ValueReference `json:"response_details"`
-
-	Entry *Entry `json:"entry"`
-
-	RequestChainedValues  []*ValueReference `json:"request_chained_values"`
-	ResponseChainedValues []*ValueReference `json:"response_chained_values"`
-}
-
+// main is the entry point of the program.
+// It parses command-line flags, reads and processes the HAR file, identifies chained values,
+// assigns variable names, builds the Postman collection, and writes it to a file.
 func main() {
 	// Define and parse command-line flags
 	harFilePath := flag.String("file", "", "Path to the HAR file")
@@ -106,6 +112,8 @@ func main() {
 	fmt.Println("Postman collection generated successfully.")
 }
 
+// logInitialChainedValues logs the initial set of chained values for debugging purposes.
+// It prints each value along with its usage context in requests and responses.
 func logInitialChainedValues(chainedValues []*ChainedValueContext) {
 	for i, chainedValue := range chainedValues {
 		fmt.Printf("Chained Value %d:\n", i+1)
@@ -124,7 +132,8 @@ func logInitialChainedValues(chainedValues []*ChainedValueContext) {
 	}
 }
 
-// findChainedValues filters CallDetails to find interesting values that appear in multiple requests and responses.
+// findChainedValues analyzes the call details to identify values that appear in multiple requests and responses.
+// It filters out values that are not considered "interesting" and returns a slice of ChainedValueContext.
 func findChainedValues(callDetailsList []*CallDetails) []*ChainedValueContext {
 	// Map to keep track of values and their occurrences
 	valueOccurrences := make(map[string][]*ValueReference)
@@ -187,6 +196,8 @@ NextChainedValue:
 	return filteredChainedValues
 }
 
+// repopulateCallDetails updates each CallDetails instance by linking it to the associated chained values.
+// It assigns the Context field of ValueReference to point to the corresponding ChainedValueContext.
 func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 	for _, chainedValue := range chainedValues {
 		for _, contextItem := range chainedValue.AllUsages {

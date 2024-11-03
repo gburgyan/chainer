@@ -28,6 +28,9 @@ type OpenAIResponse struct {
 	Choices []OpenAIChoice `json:"choices"`
 }
 
+// CallOpenAI sends a request to the OpenAI API with a given prompt and input data.
+// It handles the API call, including request preparation and response parsing.
+// It extracts and returns the generated variable names or other responses as a slice of strings.
 func CallOpenAI[T any](prompt string, input []T) ([]string, error) {
 	// Get the API key from the environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
