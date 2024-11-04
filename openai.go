@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"os"
 )
@@ -85,7 +85,7 @@ func CallOpenAI[T any](prompt string, input []T) ([]string, error) {
 	}
 	defer resp.Body.Close()
 
-	respBody, err := ioutil.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %v", err)
 	}
