@@ -36,6 +36,7 @@ type ValueReference struct {
 	Source     *CallDetails `json:"source"`
 	SourceType SourceType   `json:"source_type"`
 	Context    *ChainedValueContext
+	Ancestors  []interface{}
 }
 
 type ChainedValueContext struct {

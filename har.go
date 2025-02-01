@@ -73,44 +73,49 @@ type Content struct {
 	// Other fields can be added as needed
 }
 
-// FlattenJSON parses a JSON string and returns a flat list of ValueReference instances.
-// Each ValueReference includes the value and its JavaScript-like reference path within the JSON structure.
 func FlattenJSON(data string) ([]*ValueReference, error) {
 	var jsonData interface{}
 	if err := json.Unmarshal([]byte(data), &jsonData); err != nil {
 		return nil, err
 	}
-	var valueRefs []*ValueReference
-	flatten("", jsonData, &valueRefs)
-	return valueRefs, nil
+	// Start with an empty slice for ancestors.
+	return flatten("", nil, jsonData), nil
 }
 
-// flatten is a helper function for FlattenJSON.
-// It recursively traverses the JSON data structure and accumulates ValueReference instances with updated reference paths.
-func flatten(prefix string, data interface{}, valueRefs *[]*ValueReference) {
+func flatten(prefix string, ancestors []interface{}, data interface{}) []*ValueReference {
+	var valueRefs []*ValueReference
+
 	switch v := data.(type) {
 	case map[string]interface{}:
+		// Append a copy of the current map to the ancestors.
+		newAncestors := append(append([]interface{}{}, ancestors...), v)
 		for key, value := range v {
 			fullKey := key
 			if prefix != "" {
 				fullKey = prefix + "." + key
 			}
-			flatten(fullKey, value, valueRefs)
+			// Recurse with the updated context.
+			valueRefs = append(valueRefs, flatten(fullKey, newAncestors, value)...)
 		}
 	case []interface{}:
+		// Append a copy of the current slice to the ancestors.
+		newAncestors := append(append([]interface{}{}, ancestors...), v)
 		for i, value := range v {
 			fullKey := fmt.Sprintf("%s[%d]", prefix, i)
-			flatten(fullKey, value, valueRefs)
+			// Recurse with the updated context.
+			valueRefs = append(valueRefs, flatten(fullKey, newAncestors, value)...)
 		}
 	default:
-		// Create a ValueReference
-		valueRef := ValueReference{
+		// Base case: a leaf node. Create a ValueReference that includes the context.
+		valueRefs = append(valueRefs, &ValueReference{
 			Value:               v,
 			JavascriptReference: prefix,
-			UrlLocation:         0, // Placeholder: Set as needed
-		}
-		*valueRefs = append(*valueRefs, &valueRef)
+			UrlLocation:         0, // Placeholder: set as needed.
+			Ancestors:           ancestors,
+		})
 	}
+
+	return valueRefs
 }
 
 // ExtractURLStrings parses a raw URL string to extract path segments and query parameter values.
@@ -173,10 +178,24 @@ func processBody(body string) ([]*ValueReference, error) {
 }
 
 // processHeaders processes HTTP headers and converts them into ValueReference instances.
-// It handles special cases like stripping tokens from authorization headers.
+// It handles special cases like stripping tokens from authorization headers and ignores blacklisted headers.
 func processHeaders(headers []Header) []*ValueReference {
+	// Define a blacklist of headers to ignore
+	blacklist := map[string]struct{}{
+		"content-length": {},
+		"host":           {},
+		"connection":     {},
+		"cache-control":  {},
+		"postman-token":  {},
+	}
+
 	var headerRefs []*ValueReference
 	for _, header := range headers {
+		// Check if the header is in the blacklist
+		if _, found := blacklist[strings.ToLower(header.Name)]; found {
+			continue
+		}
+
 		headerRef := ValueReference{
 			Value:      header.Value,
 			HeaderName: header.Name,
