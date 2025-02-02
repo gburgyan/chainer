@@ -313,7 +313,7 @@ func processHar(har HAR) []*CallDetails {
 
 // readHar reads the HAR file from the specified path.
 // It unmarshals the JSON content into a HAR struct and returns any errors encountered.
-func readHar(harFilePath string) (error, HAR) {
+func readHar(harFilePath string) (HAR, error) {
 	// Read the HAR file
 	harData, err := os.ReadFile(harFilePath)
 	if err != nil {
@@ -325,5 +325,5 @@ func readHar(harFilePath string) (error, HAR) {
 	if err := json.Unmarshal(harData, &har); err != nil {
 		log.Fatalf("Error parsing HAR file: %v", err)
 	}
-	return err, har
+	return har, err
 }

@@ -102,7 +102,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	err, har := readHar(*harFilePath)
+	har, err := readHar(*harFilePath)
 	if err != nil {
 		log.Fatalf("Error reading HAR file: %v", err)
 	}
