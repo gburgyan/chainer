@@ -23,6 +23,7 @@ const (
 	SourceLocationHeader SourceLocation = iota
 	SourceLocationBodyJson
 	SourceLocationBodyForm
+	SourceLocationUrl
 )
 
 type CallDetails struct {

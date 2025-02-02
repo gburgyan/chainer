@@ -128,6 +128,13 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	}
 
 	var valueRefs []*ValueReference
+	valueRef := ValueReference{
+		Value:          parsedURL.Host,
+		ReferencePath:  fmt.Sprintf("host"),
+		UrlLocation:    0,
+		SourceLocation: SourceLocationUrl,
+	}
+	valueRefs = append(valueRefs, &valueRef)
 
 	// Extract path segments
 	cleanPath := path.Clean(parsedURL.Path)
@@ -135,9 +142,10 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	for i, segment := range segments {
 		if segment != "" {
 			valueRef := ValueReference{
-				Value:         segment,
-				ReferencePath: fmt.Sprintf("path[%d]", i),
-				UrlLocation:   i,
+				Value:          segment,
+				ReferencePath:  fmt.Sprintf("path[%d]", i),
+				UrlLocation:    i,
+				SourceLocation: SourceLocationUrl,
 			}
 			valueRefs = append(valueRefs, &valueRef)
 		}
@@ -302,6 +310,7 @@ func processHar(har HAR) []*CallDetails {
 		for j := range urlValues {
 			urlValues[j].Source = &callDetails
 			urlValues[j].SourceType = SourceTypeRequest
+			urlValues[j].SourceLocation = SourceLocationUrl
 		}
 		callDetails.RequestDetails = append(callDetails.RequestDetails, urlValues...)
 
