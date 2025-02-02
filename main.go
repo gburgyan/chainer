@@ -6,9 +6,24 @@ import (
 	"log"
 	"os"
 	"strings"
+
+	"gopkg.in/yaml.v2"
 )
 
 type SourceType int
+
+const (
+	SourceTypeRequest SourceType = iota
+	SourceTypeResponse
+)
+
+type SourceLocation int
+
+const (
+	SourceLocationHeader SourceLocation = iota
+	SourceLocationBodyJson
+	SourceLocationBodyForm
+)
 
 type CallDetails struct {
 	RequestDetails  []*ValueReference `json:"request_details"`
@@ -21,22 +36,18 @@ type CallDetails struct {
 	ResponseChainedValues []*ValueReference `json:"response_chained_values"`
 }
 
-const (
-	SourceTypeRequest SourceType = iota
-	SourceTypeResponse
-)
-
 // ValueReference represents a value along with its JavaScript-like path and header location.
 type ValueReference struct {
-	Value               any    `json:"value"`
-	JavascriptReference string `json:"javascript_reference"`
-	UrlLocation         int    `json:"url_location"`
-	HeaderName          string `json:"header_name"`
+	Value         any    `json:"value"`
+	ReferencePath string `json:"javascript_reference"`
+	UrlLocation   int    `json:"url_location"`
+	HeaderName    string `json:"header_name"` // TODO: Remove this field
 
-	Source     *CallDetails `json:"source"`
-	SourceType SourceType   `json:"source_type"`
-	Context    *ChainedValueContext
-	Ancestors  []interface{}
+	Source         *CallDetails   `json:"source"`
+	SourceType     SourceType     `json:"source_type"`
+	SourceLocation SourceLocation `json:"source_location"`
+	Context        *ChainedValueContext
+	Ancestors      []interface{}
 }
 
 type ChainedValueContext struct {
@@ -54,7 +65,7 @@ func (r *ValueReference) IsInteresting() bool {
 		return false
 	}
 
-	if strings.Contains(r.JavascriptReference, "@type") {
+	if strings.Contains(r.ReferencePath, "@type") {
 		return false
 	}
 
@@ -68,7 +79,7 @@ func (r *ValueReference) IsInteresting() bool {
 
 	switch v := r.Value.(type) {
 	case string:
-		return len(v) >= 4
+		return len(v) >= 2
 	case int:
 		return v > 1000
 	case float64:
@@ -79,18 +90,22 @@ func (r *ValueReference) IsInteresting() bool {
 
 // main is the entry point of the program.
 // It parses command-line flags, reads and processes the HAR file, identifies chained values,
-// assigns variable names, builds the Postman collection, and writes it to a file.
+// assigns variable names, substitutes pre-defined variables (if provided), builds the Postman collection, and writes it to a file.
 func main() {
 	// Define and parse command-line flags
 	harFilePath := flag.String("file", "", "Path to the HAR file")
+	varsFilePath := flag.String("vars", "", "Path to the YAML file with pre-defined variables")
 	flag.Parse()
 
 	if *harFilePath == "" {
-		fmt.Println("Usage: goharparser -file=<path_to_har_file>")
+		fmt.Println("Usage: goharparser -file=<path_to_har_file> [-vars=<path_to_yaml_file>]")
 		os.Exit(1)
 	}
 
 	err, har := readHar(*harFilePath)
+	if err != nil {
+		log.Fatalf("Error reading HAR file: %v", err)
+	}
 
 	callDetailsList := processHar(har)
 
@@ -98,8 +113,13 @@ func main() {
 	logInitialChainedValues(chainedValues)
 
 	repopulateCallDetails(chainedValues)
-
 	assignVariableNames(chainedValues)
+
+	// If a YAML file with pre-defined variables is provided, load it and substitute values.
+	if *varsFilePath != "" {
+		predefinedVars := loadYAMLVars(*varsFilePath)
+		substitutePredefinedVariables(callDetailsList, predefinedVars)
+	}
 
 	// Build the Postman collection
 	collection := BuildPostmanCollection(callDetailsList, chainedValues)
@@ -127,7 +147,7 @@ func logInitialChainedValues(chainedValues []*ChainedValueContext) {
 			} else {
 				requestOrResponse = "Response"
 			}
-			fmt.Printf("    - %s - %s\n", requestOrResponse, ref.JavascriptReference)
+			fmt.Printf("    - %s - %s\n", requestOrResponse, ref.ReferencePath)
 		}
 		fmt.Println()
 	}
@@ -175,7 +195,6 @@ func findChainedValues(callDetailsList []*CallDetails) []*ChainedValueContext {
 
 NextChainedValue:
 	for _, chainedValue := range chainedValues {
-		//var seenRequest bool
 		var seenResponse bool
 		includeVal := false
 		for _, contextItem := range chainedValue.AllUsages {
@@ -183,7 +202,6 @@ NextChainedValue:
 				if !seenResponse {
 					continue NextChainedValue
 				}
-				//seenRequest = true
 				includeVal = true
 			} else {
 				seenResponse = true
@@ -218,4 +236,51 @@ func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 			}
 		}
 	}
+}
+
+// substitutePredefinedVariables walks through all value references in the provided call details and,
+// if the value exactly matches a pre-defined variable value from the YAML file, replaces it with a variable reference.
+// For example, if the YAML file defines: username: admin, then a literal "admin" will be replaced with "{{username}}".
+func substitutePredefinedVariables(callDetailsList []*CallDetails, vars map[string]string) {
+	for _, cd := range callDetailsList {
+		for _, vr := range cd.RequestDetails {
+			substituteValue(vr, vars)
+		}
+		for _, vr := range cd.ResponseDetails {
+			substituteValue(vr, vars)
+		}
+	}
+}
+
+// substituteValue checks if the value in the ValueReference is a string and,
+// if it exactly matches one of the pre-defined values, replaces it with a variable placeholder.
+func substituteValue(vr *ValueReference, vars map[string]string) {
+	str, ok := vr.Value.(string)
+	if !ok {
+		return
+	}
+	for varName, varVal := range vars {
+		if str == varVal {
+			vr.Value = fmt.Sprintf("{{%s}}", varName)
+			// Once a match is found, no need to check the other variables.
+			break
+		}
+	}
+}
+
+// loadYAMLVars reads the YAML file at the given path and unmarshals it into a map[string]string.
+// The YAML file should contain key-value pairs like:
+//
+//	username: admin
+//	password: secret
+func loadYAMLVars(filePath string) map[string]string {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Fatalf("Error reading YAML file: %v", err)
+	}
+	var vars map[string]string
+	if err := yaml.Unmarshal(data, &vars); err != nil {
+		log.Fatalf("Error parsing YAML file: %v", err)
+	}
+	return vars
 }

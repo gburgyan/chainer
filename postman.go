@@ -117,6 +117,7 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 // ReplaceValuesInString replaces all occurrences of specified values in an input string with corresponding Postman variable placeholders.
 // It iterates over the provided ValueReference instances to perform the substitutions.
 func ReplaceValuesInString(input string, valueToVariableName []*ValueReference) string {
+	// TODO: take into account the type (JSON or form) of the body and s=use the paths to replace the values instead of the values themselves.
 	for _, v := range valueToVariableName {
 		valueString := fmt.Sprintf("%v", v.Value)
 		if v.Context == nil {
@@ -225,7 +226,7 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 	collectionVarName := chainedValue.Context.VariableName
 
 	// Build JavaScript code to extract the value with error handling
-	jsPath := chainedValue.JavascriptReference
+	jsPath := chainedValue.ReferencePath
 	scriptLines = append(scriptLines, "try {")
 	valueExtraction := fmt.Sprintf("  var %s = responseJson.%s;", collectionVarName, jsPath)
 	scriptLines = append(scriptLines, valueExtraction)
@@ -283,7 +284,7 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 		variables[i] = PostmanVariable{
 			Key: chainedValue.VariableName,
 			//Value: fmt.Sprintf("%v", chainedValue.Value),
-			Description: chainedValue.ValueSource.JavascriptReference,
+			Description: chainedValue.ValueSource.ReferencePath,
 		}
 	}
 

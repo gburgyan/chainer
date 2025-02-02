@@ -108,10 +108,11 @@ func flatten(prefix string, ancestors []interface{}, data interface{}) []*ValueR
 	default:
 		// Base case: a leaf node. Create a ValueReference that includes the context.
 		valueRefs = append(valueRefs, &ValueReference{
-			Value:               v,
-			JavascriptReference: prefix,
-			UrlLocation:         0, // Placeholder: set as needed.
-			Ancestors:           ancestors,
+			Value:          v,
+			ReferencePath:  prefix,
+			UrlLocation:    0, // Placeholder: set as needed.
+			Ancestors:      ancestors,
+			SourceLocation: SourceLocationBodyJson,
 		})
 	}
 
@@ -134,9 +135,9 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	for i, segment := range segments {
 		if segment != "" {
 			valueRef := ValueReference{
-				Value:               segment,
-				JavascriptReference: fmt.Sprintf("path[%d]", i),
-				UrlLocation:         i,
+				Value:         segment,
+				ReferencePath: fmt.Sprintf("path[%d]", i),
+				UrlLocation:   i,
 			}
 			valueRefs = append(valueRefs, &valueRef)
 		}
@@ -147,9 +148,9 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	for key, values := range parsedURL.Query() {
 		for j, value := range values {
 			valueRef := ValueReference{
-				Value:               value,
-				JavascriptReference: fmt.Sprintf("query.%s[%d]", key, j),
-				UrlLocation:         queryIndex,
+				Value:         value,
+				ReferencePath: fmt.Sprintf("query.%s[%d]", key, j),
+				UrlLocation:   queryIndex,
 			}
 			valueRefs = append(valueRefs, &valueRef)
 			queryIndex++
@@ -162,19 +163,42 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 // processBody processes the body of an HTTP request or response.
 // It assumes the body is in JSON format and flattens it using FlattenJSON.
 // It returns a slice of ValueReference instances representing the data in the body.
-func processBody(body string) ([]*ValueReference, error) {
-	// Check if body is empty
-	if strings.TrimSpace(body) == "" {
-		return nil, nil
-	}
+func processBody(body string, contentType string) ([]*ValueReference, error) {
+	// Check if the content type is JSON
+	if contentType == "application/json" {
+		// Check if body is empty
+		if strings.TrimSpace(body) == "" {
+			return nil, nil
+		}
 
-	// Flatten the JSON body
-	flatRefs, err := FlattenJSON(body)
-	if err != nil {
-		return nil, err
-	}
+		// Flatten the JSON body
+		flatRefs, err := FlattenJSON(body)
+		if err != nil {
+			return nil, err
+		}
 
-	return flatRefs, nil
+		return flatRefs, nil
+	} else if contentType == "application/x-www-form-urlencoded" {
+		// Handle form data
+		formValues, err := url.ParseQuery(body)
+		if err != nil {
+			return nil, err
+		}
+
+		var valueRefs []*ValueReference
+		for key, values := range formValues {
+			for i, value := range values {
+				valueRef := ValueReference{
+					Value:          value,
+					ReferencePath:  fmt.Sprintf("%s[%d]", key, i),
+					SourceLocation: SourceLocationBodyForm,
+				}
+				valueRefs = append(valueRefs, &valueRef)
+			}
+		}
+		return valueRefs, nil
+	}
+	return nil, nil
 }
 
 // processHeaders processes HTTP headers and converts them into ValueReference instances.
@@ -197,8 +221,10 @@ func processHeaders(headers []Header) []*ValueReference {
 		}
 
 		headerRef := ValueReference{
-			Value:      header.Value,
-			HeaderName: header.Name,
+			Value:          header.Value,
+			HeaderName:     header.Name,
+			SourceLocation: SourceLocationHeader,
+			ReferencePath:  header.Name,
 		}
 		// Remove the "bearer" token from the header value if it's an authorization header
 		if strings.ToLower(header.Name) == "authorization" {
@@ -230,16 +256,20 @@ func processHar(har HAR) []*CallDetails {
 		if entry.Request.PostData != nil && entry.Request.PostData.Text != "" {
 			reqBody = entry.Request.PostData.Text
 		}
-		reqDetails, err := processBody(reqBody)
+		requestMimeType := ""
+		if entry.Request.PostData != nil {
+			requestMimeType = entry.Request.PostData.MimeType
+		}
+		reqDetails, err := processBody(reqBody, requestMimeType)
 		if err != nil {
 			log.Printf("Error processing request body: %v", err)
 			// Continue processing even if there's an error in the request body
 		}
 		reqHeaderDetails := processHeaders(entry.Request.Headers)
 		reqDetails = append(reqDetails, reqHeaderDetails...)
-		for i := range reqDetails {
-			reqDetails[i].Source = &callDetails
-			reqDetails[i].SourceType = SourceTypeRequest
+		for j := range reqDetails {
+			reqDetails[j].Source = &callDetails
+			reqDetails[j].SourceType = SourceTypeRequest
 		}
 		callDetails.RequestDetails = reqDetails
 
@@ -249,7 +279,7 @@ func processHar(har HAR) []*CallDetails {
 
 		// Process Response Body
 		respBody := entry.Response.Content.Text
-		respDetails, err := processBody(respBody)
+		respDetails, err := processBody(respBody, entry.Response.Content.MimeType)
 		if err != nil {
 			log.Printf("Error processing response body: %v", err)
 			// Continue processing even if there's an error in the response body

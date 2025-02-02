@@ -18,7 +18,7 @@ func assignVariableNames(chainedValues []*ChainedValueContext) {
 	for _, value := range chainedValues {
 		variableNames = append(variableNames, VariableNameGenerator{
 			OriginRequestUrl: value.ValueSource.Source.Entry.Request.URL,
-			ResponsePath:     value.ValueSource.JavascriptReference,
+			ResponsePath:     value.ValueSource.ReferencePath,
 		})
 	}
 
