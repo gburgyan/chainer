@@ -10,69 +10,102 @@ import (
 	"strings"
 )
 
-// HAR represents the root of the HAR file.
+// HAR represents the root structure of a HAR (HTTP Archive) file.
+// It contains a log of HTTP transactions.
 type HAR struct {
+	// Log holds the collection of HTTP entries.
 	Log Log `json:"log"`
 }
 
-// Log contains the entries.
+// Log encapsulates the log section of a HAR file,
+// containing a slice of HTTP transaction entries.
 type Log struct {
+	// Entries is a list of HTTP transactions recorded in the HAR file.
 	Entries []Entry `json:"entries"`
 }
 
-// Entry represents a single HTTP transaction.
+// Entry represents a single HTTP transaction as recorded in a HAR file.
+// It includes both the HTTP request and response details.
 type Entry struct {
-	Request  Request  `json:"request"`
+	// Request contains the details of the HTTP request.
+	Request Request `json:"request"`
+	// Response contains the details of the HTTP response.
 	Response Response `json:"response"`
 }
 
-// Request represents the HTTP request.
+// Request represents an HTTP request.
+// It includes the method, URL, optional POST data, and headers.
 type Request struct {
-	Method   string    `json:"method"`
-	URL      string    `json:"url"`
+	// Method is the HTTP method (e.g. GET, POST).
+	Method string `json:"method"`
+	// URL is the target URL for the request.
+	URL string `json:"url"`
+	// PostData contains the payload of the request (if any).
 	PostData *PostData `json:"postData,omitempty"`
-	Headers  []Header  `json:"headers,omitempty"` // Optional: To handle headers if needed
-	// Other fields can be added as needed
+	// Headers is a list of HTTP headers sent with the request.
+	Headers []Header `json:"headers,omitempty"` // Optional: To handle headers if needed
+	// Additional fields can be added as needed.
 }
 
-// PostData represents the post data of the request.
+// PostData represents the payload data of an HTTP request.
+// It includes the MIME type and either a text payload or parameters.
 type PostData struct {
-	MimeType string      `json:"mimeType"`
-	Text     string      `json:"text,omitempty"`
-	Params   []PostParam `json:"params,omitempty"`
-	// Other fields can be added as needed
+	// MimeType indicates the MIME type of the post data (e.g., application/json).
+	MimeType string `json:"mimeType"`
+	// Text contains the raw textual payload (if available).
+	Text string `json:"text,omitempty"`
+	// Params is a list of parameters included in the post data.
+	Params []PostParam `json:"params,omitempty"`
+	// Additional fields can be added as needed.
 }
 
-// PostParam represents parameters in post data.
+// PostParam represents an individual parameter within the POST data of a request.
 type PostParam struct {
-	Name  string `json:"name"`
+	// Name is the name of the parameter.
+	Name string `json:"name"`
+	// Value is the value of the parameter.
 	Value string `json:"value"`
-	// Other fields can be added as needed
+	// Additional fields can be added as needed.
 }
 
 // Header represents a single HTTP header.
+// It consists of a header name and its corresponding value.
 type Header struct {
-	Name  string `json:"name"`
+	// Name is the name of the HTTP header.
+	Name string `json:"name"`
+	// Value is the value associated with the header.
 	Value string `json:"value"`
 }
 
-// Response represents the HTTP response.
+// Response represents an HTTP response.
+// It contains status information, the content payload, headers, and other metadata.
 type Response struct {
-	Status      int      `json:"status"`
-	StatusText  string   `json:"statusText"`
-	Content     Content  `json:"content"`
-	RedirectURL string   `json:"redirectURL,omitempty"`
-	Headers     []Header `json:"headers,omitempty"` // Optional: To handle headers if needed
-	// Other fields can be added as needed
+	// Status is the HTTP status code (e.g., 200, 404).
+	Status int `json:"status"`
+	// StatusText provides a textual description of the status.
+	StatusText string `json:"statusText"`
+	// Content holds the body content of the response.
+	Content Content `json:"content"`
+	// RedirectURL is the URL to which the response is redirecting (if applicable).
+	RedirectURL string `json:"redirectURL,omitempty"`
+	// Headers is a list of HTTP headers included in the response.
+	Headers []Header `json:"headers,omitempty"` // Optional: To handle headers if needed
+	// Additional fields can be added as needed.
 }
 
-// Content represents the content of the response.
+// Content represents the payload of an HTTP response.
+// It includes details such as the MIME type and the textual content.
 type Content struct {
+	// MimeType indicates the MIME type of the response content.
 	MimeType string `json:"mimeType"`
-	Text     string `json:"text,omitempty"`
-	// Other fields can be added as needed
+	// Text contains the actual textual content of the response (if available).
+	Text string `json:"text,omitempty"`
+	// Additional fields can be added as needed.
 }
 
+// FlattenJSON takes a JSON string and flattens it into a slice of ValueReference pointers.
+// It first unmarshals the JSON into an interface{} and then recursively extracts all leaf nodes,
+// tracking the full "path" to each value.
 func FlattenJSON(data string) ([]*ValueReference, error) {
 	var jsonData interface{}
 	if err := json.Unmarshal([]byte(data), &jsonData); err != nil {
@@ -82,6 +115,8 @@ func FlattenJSON(data string) ([]*ValueReference, error) {
 	return flatten("", nil, jsonData), nil
 }
 
+// flatten recursively walks through a JSON structure, extracting leaf nodes as ValueReference instances.
+// It keeps track of the current path (prefix) and ancestors to provide full context for each value.
 func flatten(prefix string, ancestors []interface{}, data interface{}) []*ValueReference {
 	var valueRefs []*ValueReference
 
@@ -119,8 +154,8 @@ func flatten(prefix string, ancestors []interface{}, data interface{}) []*ValueR
 	return valueRefs
 }
 
-// ExtractURLStrings parses a raw URL string to extract path segments and query parameter values.
-// It converts these components into ValueReference instances with appropriate reference paths.
+// ExtractURLStrings parses a raw URL string to extract components such as host, path segments,
+// and query parameter values. Each component is converted into a ValueReference with an appropriate reference path.
 func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 	parsedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -169,8 +204,7 @@ func ExtractURLStrings(rawURL string) ([]*ValueReference, error) {
 }
 
 // processBody processes the body of an HTTP request or response.
-// It assumes the body is in JSON format and flattens it using FlattenJSON.
-// It returns a slice of ValueReference instances representing the data in the body.
+// It assumes the body is in JSON format (or form data) and flattens it into ValueReference instances.
 func processBody(body string, contentType string) ([]*ValueReference, error) {
 	// Check if the content type is JSON
 	if contentType == "application/json" {
@@ -210,7 +244,7 @@ func processBody(body string, contentType string) ([]*ValueReference, error) {
 }
 
 // processHeaders processes HTTP headers and converts them into ValueReference instances.
-// It handles special cases like stripping tokens from authorization headers and ignores blacklisted headers.
+// It filters out blacklisted headers and handles special cases such as stripping tokens from authorization headers.
 func processHeaders(headers []Header) []*ValueReference {
 	// Define a blacklist of headers to ignore
 	blacklist := map[string]struct{}{
@@ -234,7 +268,7 @@ func processHeaders(headers []Header) []*ValueReference {
 			SourceLocation: SourceLocationHeader,
 			ReferencePath:  header.Name,
 		}
-		// Remove the "bearer" token from the header value if it's an authorization header
+		// Remove the "Bearer" token from the header value if it's an authorization header
 		if strings.ToLower(header.Name) == "authorization" {
 			headerRef.Value = strings.TrimPrefix(header.Value, "Bearer ")
 		}
@@ -280,10 +314,6 @@ func processHar(har HAR) []*CallDetails {
 			reqDetails[j].SourceType = SourceTypeRequest
 		}
 		callDetails.RequestDetails = reqDetails
-
-		// Optionally, process request headers
-		// reqHeaderRefs := processHeaders(entry.Request.Headers)
-		// callDetails.RequestDetails = append(callDetails.RequestDetails, reqHeaderRefs...)
 
 		// Process Response Body
 		respBody := entry.Response.Content.Text
