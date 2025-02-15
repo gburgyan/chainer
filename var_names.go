@@ -22,7 +22,7 @@ func assignVariableNames(chainedValues []*ChainedValueContext) {
 		})
 	}
 
-	res, err := CallOpenAI(`I want you to come up with good variable names for values retrieved from an API.
+	res, err := CallOpenAIArray[string](`I want you to come up with good variable names for values retrieved from an API.
 		Please ensure each variable name is descriptive and follows best practices and is unique, but don't be overly verbose.
 	Don't include things like "identifier" or "value" in the name unless it's critical to the naming, just the most descriptive part as a human would name it.
 
