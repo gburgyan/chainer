@@ -94,7 +94,7 @@ func updateComplexPaths(values []*ChainedValueContext) {
 		}
 
 		// Prune the JSON to get only the partial structure
-		prunedJSON, err := extractPartialJSON(fullResponse, chainedVal.ValueSource.ReferencePath, 3)
+		prunedJSON, err := extractPartialJSON(fullResponse, chainedVal.ValueSource.ReferencePath, 4)
 		if err != nil {
 			log.Printf("updateComplexPaths: error extracting partial JSON: %v", err)
 			continue
@@ -146,7 +146,13 @@ func buildComplexPathPrompt() string {
 I have a JSON response from the Travelport JSON API. I want you to look at the JSON snippet and the
 current JSON path I used to find a particular value. If the path is stable enough with simple array indexing
 and object names, give me that path in return. If the JSON structure is more complex or an array index is not guaranteed,
-please provide a JSONPath expression that is robust enough to find this value. The response is trimmed so you only see
+please provide a JSONPath expression that is robust enough to find this value. As this will be used to replay the API
+calls, please ensure the path is stable and reliable across different responses -- if there are accesses to arrays, IF
+IT MAKES SENSE, you can rewrite the array index to 0 or some other smaller number. I.e. if the path is
+foo[2].bar.baz.qux, you can simplify it to foo[0].bar.baz.qux -- again, if and only if it makes sense in the context.
+
+
+The response is trimmed so you only see
 the last few levels and immediate ancestors. Output should be a single string (JSON-encoded) representing the refined path
 or JSONPath. Do not include any additional explanation.`
 }
