@@ -106,4 +106,6 @@ type ChainedValueContext struct {
 
 	// VariableName is an optional name assigned to the value for substitution purposes.
 	VariableName string
+
+	ExternalSource bool
 }

@@ -228,8 +228,14 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 	// Build JavaScript code to extract the value with error handling
 	jsPath := chainedValue.ReferencePath
 	scriptLines = append(scriptLines, "try {")
-	valueExtraction := fmt.Sprintf("  var %s = responseJson.%s;", collectionVarName, jsPath)
-	scriptLines = append(scriptLines, valueExtraction)
+	// If the jspath contains a $ sign, it is a JSONPath expression
+	if strings.Contains(jsPath, "$") {
+		valueExtraction := fmt.Sprintf("  var %s = jsonpath.query(responseJson, %s)[0];", collectionVarName, jsPath)
+		scriptLines = append(scriptLines, valueExtraction)
+	} else {
+		valueExtraction := fmt.Sprintf("  var %s = responseJson.%s;", collectionVarName, jsPath)
+		scriptLines = append(scriptLines, valueExtraction)
+	}
 	setVariable := fmt.Sprintf("  pm.collectionVariables.set(\"%s\", %s);", collectionVarName, collectionVarName)
 	scriptLines = append(scriptLines, setVariable)
 	printToConsole := fmt.Sprintf("  console.log('Variable: %s, Value:', %s);", collectionVarName, collectionVarName)
@@ -281,10 +287,17 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 
 	variables := make([]PostmanVariable, len(chainedValues))
 	for i, chainedValue := range chainedValues {
+		var description string
+		if chainedValue.ValueSource != nil {
+			description = chainedValue.ValueSource.ReferencePath
+		} else {
+			description = "Manually set variable"
+		}
+
 		variables[i] = PostmanVariable{
 			Key: chainedValue.VariableName,
 			//Value: fmt.Sprintf("%v", chainedValue.Value),
-			Description: chainedValue.ValueSource.ReferencePath,
+			Description: description,
 		}
 	}
 

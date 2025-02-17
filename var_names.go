@@ -16,10 +16,17 @@ func assignVariableNames(chainedValues []*ChainedValueContext) {
 
 	var variableNames []VariableNameGenerator
 	for _, value := range chainedValues {
-		variableNames = append(variableNames, VariableNameGenerator{
-			OriginRequestUrl: value.ValueSource.Source.Entry.Request.URL,
-			ResponsePath:     value.ValueSource.ReferencePath,
-		})
+		if value.ValueSource == nil {
+			variableNames = append(variableNames, VariableNameGenerator{
+				OriginRequestUrl: value.AllUsages[0].Source.Entry.Request.URL,
+				ResponsePath:     value.AllUsages[0].ReferencePath,
+			})
+		} else {
+			variableNames = append(variableNames, VariableNameGenerator{
+				OriginRequestUrl: value.ValueSource.Source.Entry.Request.URL,
+				ResponsePath:     value.ValueSource.ReferencePath,
+			})
+		}
 	}
 
 	res, err := CallOpenAIArray[string](`I want you to come up with good variable names for values retrieved from an API.
