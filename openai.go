@@ -55,7 +55,11 @@ func callOpenAIBase(prompt string, input interface{}) (string, error) {
 		},
 		{
 			Role:    "user",
-			Content: prompt + "\n" + string(jsonData),
+			Content: prompt,
+		},
+		{
+			Role:    "user",
+			Content: string(jsonData),
 		},
 	}
 

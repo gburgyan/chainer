@@ -1,14 +1,13 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
 	"os"
 	"strings"
-
-	"gopkg.in/yaml.v2"
 )
 
 // flags holds the parsed command-line flag values.
@@ -16,6 +15,12 @@ type flags struct {
 	harFilePath  string
 	varsFilePath string
 	outputPath   string
+}
+
+type varsInput struct {
+	Name              string `json:"name"`
+	SearchValue       string `json:"search_value"`
+	InitializerPrompt string `json:"initializer,omitempty"`
 }
 
 func main() {
@@ -42,7 +47,7 @@ func run() error {
 	chainedValues := findChainedValues(callDetailsList)
 	// Optionally substitute pre-defined variables from a YAML file.
 	if f.varsFilePath != "" {
-		predefinedVars := loadYAMLVars(f.varsFilePath)
+		predefinedVars := loadJSONVars(f.varsFilePath)
 		chainedValues = extractPredefinedVars(callDetailsList, predefinedVars, chainedValues)
 	}
 
@@ -221,7 +226,7 @@ func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 // extractPredefinedVars walks through all value references in the provided call details and,
 // if the value exactly matches a pre-defined variable value from the YAML file, replaces it with a variable reference.
 // For example, if the YAML file defines: username: admin, then a literal "admin" will be replaced with "{{username}}".
-func extractPredefinedVars(callDetailsList []*CallDetails, vars map[string]string, values []*ChainedValueContext) []*ChainedValueContext {
+func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, values []*ChainedValueContext) []*ChainedValueContext {
 	// Make a copy of the values to avoid modifying the original slice
 	resultValues := make([]*ChainedValueContext, len(values))
 	copy(resultValues, values)
@@ -240,18 +245,19 @@ func extractPredefinedVars(callDetailsList []*CallDetails, vars map[string]strin
 
 // substituteValue checks if the value in the ValueReference is a string and,
 // if it exactly matches one of the pre-defined values, replaces it with a variable placeholder.
-func substituteValue(vr *ValueReference, vars map[string]string) *ChainedValueContext {
+func substituteValue(vr *ValueReference, vars []varsInput) *ChainedValueContext {
 	str, ok := vr.Value.(string)
 	if !ok {
 		return nil
 	}
-	for varName, varVal := range vars {
-		if str == varVal {
+	for _, vi := range vars {
+		if str == vi.SearchValue {
 			manualChainedValue := &ChainedValueContext{
-				Value:          varVal,
+				Value:          vi.SearchValue,
 				AllUsages:      []*ValueReference{vr},
 				ExternalSource: true,
-				VariableName:   varName,
+				VariableName:   vi.Name,
+				InitScript:     vi.InitializerPrompt,
 			}
 			return manualChainedValue
 		}
@@ -259,19 +265,14 @@ func substituteValue(vr *ValueReference, vars map[string]string) *ChainedValueCo
 	return nil
 }
 
-// loadYAMLVars reads the YAML file at the given path and unmarshals it into a map[string]string.
-// The YAML file should contain key-value pairs like:
-//
-//	username: admin
-//	password: secret
-func loadYAMLVars(filePath string) map[string]string {
+func loadJSONVars(filePath string) []varsInput {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Error reading YAML file: %v", err)
+		log.Fatalf("Error reading JSON file: %v", err)
 	}
-	var vars map[string]string
-	if err := yaml.Unmarshal(data, &vars); err != nil {
-		log.Fatalf("Error parsing YAML file: %v", err)
+	var vars []varsInput
+	if err := json.Unmarshal(data, &vars); err != nil {
+		log.Fatalf("Error parsing JSON file: %v", err)
 	}
 	return vars
 }
