@@ -90,6 +90,9 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	// Replace chained values in the request headers
 	var headers []PostmanHeader
 	for _, header := range request.Entry.Request.Headers {
+		if shouldSkipHeader(header) {
+			continue
+		}
 		headers = append(headers, PostmanHeader{
 			Key:   header.Name,
 			Value: ReplaceValuesInString(header.Value, request.RequestChainedValues),
@@ -112,6 +115,20 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	}
 
 	return postmanRequest
+}
+
+func shouldSkipHeader(header Header) bool {
+	// Skip headers that are automatically set by Postman
+	if strings.HasPrefix(header.Name, "Postman-") {
+		return true
+	}
+
+	// Skip Content-Length header
+	if header.Name == "Content-Length" {
+		return true
+	}
+
+	return false
 }
 
 // ReplaceValuesInString replaces all occurrences of specified values in an input string with corresponding Postman variable placeholders.
@@ -328,7 +345,7 @@ func CreateInitScript(values []*ChainedValueContext) *PostmanEvent {
 		collectionVarName := chainedValue.VariableName
 
 		if chainedValue.InitScript != "" {
-			scriptLines = append(scriptLines, "{")
+			scriptLines = append(scriptLines, "try {")
 			scriptLines = append(scriptLines, chainedValue.InitScript)
 
 			setVariable := fmt.Sprintf("  pm.collectionVariables.set(\"%s\", result);", collectionVarName)

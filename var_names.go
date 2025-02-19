@@ -9,11 +9,11 @@ type VariableGenerator struct {
 	ResponsePath      string `json:"response_path"`
 	ExampleValue      string `json:"example_value,omitempty"`
 	InitializerPrompt string `json:"initializer_prompt,omitempty"`
+	ProposedName      string `json:"proposed_name,omitempty"`
 }
 
 type VariableGeneratorResponse struct {
-	VariableName string `json:"variable_name"`
-	InitScript   string `json:"init_script"`
+	VariableName string `json:"name"`
 }
 
 // assignVariableNames assigns descriptive variable names to each chained value.
@@ -23,9 +23,15 @@ func assignVariableNames(chainedValues []*ChainedValueContext) {
 
 	var variableNames []VariableGenerator
 	for _, cv := range chainedValues {
+		// Ensure value isn't longer than 50 chars
+		val := cv.Value
+		if len(val) > 50 {
+			val = val[:50]
+		}
 		vg := VariableGenerator{
-			ExampleValue:      cv.Value,
+			ExampleValue:      val,
 			InitializerPrompt: cv.InitScript,
+			ProposedName:      cv.VariableName,
 		}
 		if cv.ValueSource == nil {
 			vg.OriginRequestUrl = cv.AllUsages[0].Source.Entry.Request.URL
@@ -41,7 +47,8 @@ func assignVariableNames(chainedValues []*ChainedValueContext) {
 	res, err := CallOpenAIArray[VariableGeneratorResponse](`
 I want you to come up with good variable names and optional initializers for values retrieved from an API.
 Please ensure each variable name is descriptive and follows best practices and is unique, but don't be overly verbose.
-Don't include things like "identifier" or "value" in the name unless it's critical to the naming, just the most descriptive part as a human would name it.
+Don't include things like "identifier" or "value" in the name unless it's critical to the naming, just the most descriptive
+part as a human would name it.
 
 The API is the Travelport JSON API. Use the knowledge of the API to come up with good names.
 
@@ -56,7 +63,7 @@ An example of the input data is an array of objects like this:
 		  "origin_request_url": "https://api.travelport.com/v1/air/flight",
 		  "response_path": "$.data.flights[0].segments[0].departure_time",
 		  "example_value": "2025-01-02",
-		  "initializer_prompt": "A day that is 3 weeks from the time the script is run"
+	      "proposed_name": "departureTime"
 	}
 ]
 
@@ -64,16 +71,15 @@ The format of the response should be an array of objects like this:
 
 [
 	{
-		"variable_name": "departureTime",
-		"init_script": "var result = new Date(); result.setDate(result.getDate() + 21); result.setHours(0, 0, 0, 0); result = result.toISOString().split('T')[0];"
-	}
+		"name": "departureTime",
+	}, ...
 ]
 
-If no initialization script is requested, please omit the "init_script" field.
+If a proposed name is provided, please use that as the variable name (and also return it)
+Ensure that there are no conflicts with other variable names.
+There should be a 1:1 correspondence between the input and output arrays. Every input *must* have a corresponding output.
 
-There should be a 1:1 correspondence between the input and output arrays.
-
-Here's what I need to get processed:`, variableNames)
+Please return a completely undecorated JSON response with just the array of objects.`, variableNames)
 
 	if err != nil {
 		log.Fatalf("Error calling OpenAI: %v", err)
@@ -82,6 +88,5 @@ Here's what I need to get processed:`, variableNames)
 	// Assign variable names
 	for i, value := range chainedValues {
 		value.VariableName = res[i].VariableName
-		value.InitScript = res[i].InitScript
 	}
 }

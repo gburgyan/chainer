@@ -231,11 +231,15 @@ func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, val
 	resultValues := make([]*ChainedValueContext, len(values))
 	copy(resultValues, values)
 
-	for _, cd := range callDetailsList {
-		for _, vr := range cd.RequestDetails {
-			cv := substituteValue(vr, vars)
-			if cv != nil {
-				resultValues = append(resultValues, cv)
+NEXTVAR:
+	for _, v := range vars {
+		for _, cd := range callDetailsList {
+			for _, vr := range cd.RequestDetails {
+				cv := substituteValue(vr, v)
+				if cv != nil {
+					resultValues = append(resultValues, cv)
+					continue NEXTVAR
+				}
 			}
 		}
 	}
@@ -245,22 +249,20 @@ func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, val
 
 // substituteValue checks if the value in the ValueReference is a string and,
 // if it exactly matches one of the pre-defined values, replaces it with a variable placeholder.
-func substituteValue(vr *ValueReference, vars []varsInput) *ChainedValueContext {
+func substituteValue(vr *ValueReference, vi varsInput) *ChainedValueContext {
 	str, ok := vr.Value.(string)
 	if !ok {
 		return nil
 	}
-	for _, vi := range vars {
-		if str == vi.SearchValue {
-			manualChainedValue := &ChainedValueContext{
-				Value:          vi.SearchValue,
-				AllUsages:      []*ValueReference{vr},
-				ExternalSource: true,
-				VariableName:   vi.Name,
-				InitScript:     vi.InitializerPrompt,
-			}
-			return manualChainedValue
+	if str == vi.SearchValue {
+		manualChainedValue := &ChainedValueContext{
+			Value:          vi.SearchValue,
+			AllUsages:      []*ValueReference{vr},
+			ExternalSource: true,
+			VariableName:   vi.Name,
+			InitScript:     vi.InitializerPrompt,
 		}
+		return manualChainedValue
 	}
 	return nil
 }
