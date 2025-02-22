@@ -295,13 +295,8 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 			events = append(events, *initScript)
 		}
 
-		parsedUrl, err := url.Parse(callDetails.Entry.Request.URL)
-		if err != nil {
-			log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
-			continue
-		}
 		item := PostmanItem{
-			Name:    fmt.Sprintf("Req %s", parsedUrl.Path),
+			Name:    callDetails.Name,
 			Request: postmanRequest,
 			Event:   events,
 		}

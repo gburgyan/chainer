@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
 )
@@ -55,6 +56,7 @@ func run() error {
 	repopulateCallDetails(chainedValues)
 	updateComplexPaths(chainedValues)
 	assignVariableNames(chainedValues)
+	assignCallDetailNames(callDetailsList)
 
 	// Build the Postman collection and write it to a file.
 	collection := BuildPostmanCollection(callDetailsList, chainedValues)
@@ -64,6 +66,86 @@ func run() error {
 
 	fmt.Println("Postman collection generated successfully.")
 	return nil
+}
+
+// CallNameRequest holds the URL and sequence number for naming a call.
+type CallNameRequest struct {
+	URL      string `json:"url"`
+	Sequence int    `json:"sequence"`
+}
+
+// CallNameResponse represents the AI-generated name.
+type CallNameResponse struct {
+	Name string `json:"name"`
+}
+
+// assignCallDetailNames uses the OpenAI API to generate descriptive call names based on the URL and the sequence of the calls.
+func assignCallDetailNames(list []*CallDetails) {
+	var requests []CallNameRequest
+	for i, callDetails := range list {
+		// Parse the URL for validation.
+		parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+		if err != nil {
+			log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+			continue
+		}
+		requests = append(requests, CallNameRequest{
+			URL:      parsedURL.String(),
+			Sequence: i + 1,
+		})
+	}
+
+	prompt := `
+I have a list of API calls with their URLs and a sequence number indicating the order in which they occur.
+For each call, please provide a concise and descriptive name that reflects the endpoint and order.
+The input is an array of objects with "url" and "sequence".
+
+These are all calls made to the Travelport JSON API, so use the knowledge you have to come up with good names.
+
+Return an array of objects with the call name in the field "name", ensuring that the names are unique and clear.
+Return the raw JSON array of objects with no commentary or formatting.
+
+The format of the result should be:
+[
+  {
+	"name": "Name of the first call"
+  },
+  ...repeat for each call...
+]
+`
+	responses, err := CallOpenAIArray[CallNameResponse](prompt, requests)
+	if err != nil {
+		// Fall back to using the URL's path if the AI call fails.
+		for _, callDetails := range list {
+			parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+			if err != nil {
+				log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+				continue
+			}
+			callDetails.Name = parsedURL.Path
+		}
+		log.Printf("Error calling OpenAI: %v", err)
+		return
+	}
+
+	// Ensure there is a 1:1 correspondence between the input and the response.
+	if len(responses) != len(requests) {
+		log.Printf("Mismatched response count from OpenAI, falling back to URL path names")
+		for _, callDetails := range list {
+			parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+			if err != nil {
+				log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+				continue
+			}
+			callDetails.Name = parsedURL.Path
+		}
+		return
+	}
+
+	// Assign the AI-generated names to the respective call details.
+	for i, callDetails := range list {
+		callDetails.Name = responses[i].Name
+	}
 }
 
 // parseFlags extracts and validates command-line flags.
@@ -231,40 +313,42 @@ func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, val
 	resultValues := make([]*ChainedValueContext, len(values))
 	copy(resultValues, values)
 
-NEXTVAR:
 	for _, v := range vars {
+		manualChainedValue := &ChainedValueContext{
+			Value:          v.SearchValue,
+			ExternalSource: true,
+			VariableName:   v.Name,
+			InitScript:     v.InitializerPrompt,
+		}
+		found := false
 		for _, cd := range callDetailsList {
 			for _, vr := range cd.RequestDetails {
-				cv := substituteValue(vr, v)
-				if cv != nil {
-					resultValues = append(resultValues, cv)
-					continue NEXTVAR
+				found = addPredefinedUseIfFound(manualChainedValue, vr)
+				if found {
+					found = true
 				}
 			}
+		}
+		if found {
+			resultValues = append(resultValues, manualChainedValue)
 		}
 	}
 
 	return resultValues
 }
 
-// substituteValue checks if the value in the ValueReference is a string and,
+// addPredefinedUseIfFound checks if the value in the ValueReference is a string and,
 // if it exactly matches one of the pre-defined values, replaces it with a variable placeholder.
-func substituteValue(vr *ValueReference, vi varsInput) *ChainedValueContext {
+func addPredefinedUseIfFound(cv *ChainedValueContext, vr *ValueReference) bool {
 	str, ok := vr.Value.(string)
 	if !ok {
-		return nil
+		return false
 	}
-	if str == vi.SearchValue {
-		manualChainedValue := &ChainedValueContext{
-			Value:          vi.SearchValue,
-			AllUsages:      []*ValueReference{vr},
-			ExternalSource: true,
-			VariableName:   vi.Name,
-			InitScript:     vi.InitializerPrompt,
-		}
-		return manualChainedValue
+	if str == cv.Value {
+		cv.AllUsages = append(cv.AllUsages, vr)
+		return true
 	}
-	return nil
+	return false
 }
 
 func loadJSONVars(filePath string) []varsInput {
