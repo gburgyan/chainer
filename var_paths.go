@@ -44,13 +44,17 @@ func updateComplexPaths(values []*ChainedValueContext) {
 		log.Printf("Pruned JSON for path %q: %s", chainedVal.ValueSource.ReferencePath, prunedJSON)
 
 		// Build the prompt input (the user message) for refining the JSON path
-		input := []ComplexPathRequest{
-			{
-				URL:         respEntry.Request.URL,
-				CurrentPath: chainedVal.ValueSource.ReferencePath,
-				PartialJSON: prunedJSON,
-				Value:       chainedVal.Value,
-			},
+		input := ComplexPathRequest{
+			URL:         respEntry.Request.URL,
+			CurrentPath: chainedVal.ValueSource.ReferencePath,
+			PartialJSON: prunedJSON,
+			Value:       chainedVal.Value,
+		}
+
+		for _, usage := range chainedVal.AllUsages {
+			if usage.SourceType == SourceTypeRequest {
+				input.UsagePaths = append(input.UsagePaths, usage.ReferencePath)
+			}
 		}
 
 		// Craft the final prompt for OpenAI
@@ -70,7 +74,7 @@ func updateComplexPaths(values []*ChainedValueContext) {
 
 		// Update the reference path with the new stable/complex path
 		chainedVal.ValueSource.ReferencePath = newPathList
-		log.Printf("Updated path from %q to %q", input[0].CurrentPath, chainedVal.ValueSource.ReferencePath)
+		log.Printf("Updated path from %q to %q", input.CurrentPath, chainedVal.ValueSource.ReferencePath)
 	}
 }
 
@@ -80,6 +84,7 @@ func updateComplexPaths(values []*ChainedValueContext) {
 type ComplexPathRequest struct {
 	URL         string      `json:"url"`
 	CurrentPath string      `json:"current_path"`
+	UsagePaths  []string    `json:"usage_paths"`
 	PartialJSON interface{} `json:"partial_json"`
 	Value       string      `json:"value"`
 }
@@ -88,26 +93,14 @@ type ComplexPathRequest struct {
 // either a simple JSON expression or a JSONPath for the value if the structure is complicated.
 func buildComplexPathPrompt() string {
 	return `
-I have a JSON response from the Travelport JSON API. I want you to look at the JSON snippet and the
-current JSON path I used to find a particular value. If the path is stable enough with simple array indexing
-and object names, give me that path in return. If the JSON structure is more complex or an array index is not guaranteed,
-please provide a JSONPath expression that is robust enough to find this value. As this will be used to replay the API
-calls, please ensure the path is stable and reliable across different responses -- if there are accesses to arrays, IF
-IT MAKES SENSE, you can rewrite the array index to 0 or some other smaller number. I.e. if the path is
-foo[2].bar.baz.qux, you can simplify it to foo[0].bar.baz.qux -- again, if and only if it makes sense in the context.
-
-The exact path of the value is provided in the "current_path" field, and the partial JSON snippet is in the "partial_json" field.
-
-The partial JSON snippet is a small piece of the JSON response that contains the value. This is to help you understand the context
-of the value and the structure of the JSON. You can use this to determine the best way to access the value.
-
-The value that we're interested in is in the "value" field. This is the actual value that we want to access in the JSON.
-
-Use context clues from both the current path and the partial JSON to determine the best way to access the value.
-
-If a JSONPath is not required or applicable, you can return the original path as is.
-
-Do not include any additional explanation or markup, simply the javascript expression.`
+We have a JSON snippet ("partial_json"), a path ("current_path"), and a value ("value").
+We want a stable expression that reliably finds this value, even if the JSON structure changes.
+- If a simple object/array syntax (e.g. foo.bar[0].baz) is stable, just return that.
+- If array positions can vary or the structure is more complex, return a robust JSONPath expression.
+- Rewrite array indices to [0] only if it doesn’t change which item we need.
+- Consider "usage_paths" (future usage) to ensure we pick the correct element.
+Return only the final path or JSONPath expression, with no extra explanation or markup.
+`
 }
 
 // extractPartialJSON extracts a snippet of the JSON source surrounding the target path.

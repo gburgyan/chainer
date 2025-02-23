@@ -102,7 +102,8 @@ The input is an array of objects with "url" and "sequence".
 
 These are all calls made to the Travelport JSON API, so use the knowledge you have to come up with good names.
 
-Return an array of objects with the call name in the field "name", ensuring that the names are unique and clear.
+Return an array of objects with the call name in the field "name", ensuring that the names are clear as they will be seen by users.
+There may be multiple instances of the same call. Always return something for each call -- they may be the same name if appropriate.
 Return the raw JSON array of objects with no commentary or formatting.
 
 The format of the result should be:
