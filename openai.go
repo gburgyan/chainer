@@ -9,112 +9,153 @@ import (
 	"os"
 )
 
+// OpenAIMessage represents a single message for the OpenAI API.
 type OpenAIMessage struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
 }
 
+// OpenAIRequest is the request body sent to the OpenAI API.
 type OpenAIRequest struct {
 	Model     string          `json:"model"`
 	Messages  []OpenAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
+	MaxTokens int             `json:"max_tokens,omitempty"`
 }
 
+// OpenAIChoice represents one of the choices in the OpenAI API response.
 type OpenAIChoice struct {
 	Message OpenAIMessage `json:"message"`
 }
 
+// OpenAIResponse represents the response from the OpenAI API.
 type OpenAIResponse struct {
 	Choices []OpenAIChoice `json:"choices"`
 }
 
-// CallOpenAI sends a request to the OpenAI API with a given prompt and input data.
-// It handles the API call, including request preparation and response parsing.
-// It extracts and returns the generated variable names or other responses as a slice of strings.
-func CallOpenAI[T any](prompt string, input []T) ([]string, error) {
+// callOpenAIBase sends the request to the OpenAI API and returns the raw response string.
+// It serves as the common base for the higher-level helper functions.
+func callOpenAIBase(prompt string, input interface{}) (string, error) {
 	// Get the API key from the environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	if apiKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+		return "", fmt.Errorf("OPENAI_API_KEY environment variable is not set")
 	}
 
 	// Convert input to JSON
 	jsonData, err := json.Marshal(input)
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling input: %v", err)
+		return "", fmt.Errorf("error marshalling input: %v", err)
 	}
 
-	// Prepare the prompt in messages format
+	// Prepare the messages
 	messages := []OpenAIMessage{
 		{
-			Role:    "system",
+			Role:    "user",
 			Content: "You are an assistant that takes the input request and performs a simple request.",
 		},
 		{
 			Role:    "user",
-			Content: prompt + "\n" + string(jsonData),
+			Content: prompt,
+		},
+		{
+			Role:    "user",
+			Content: string(jsonData),
 		},
 	}
 
-	// log the request
+	// Log the request for debugging
 	fmt.Println("Request to OpenAI:")
 	fmt.Println(messages)
 
-	// Set up the OpenAI request
+	// Create the OpenAI request body
 	reqBody := OpenAIRequest{
-		Model:     "gpt-4o-mini",
-		Messages:  messages,
-		MaxTokens: 10000,
+		//Model: "o3-mini",
+		//Model: "o1-mini",
+		Model: "gpt-4o-mini",
+		//Model:     "gpt-4o",
+		Messages: messages,
+		//MaxTokens: 16384,
 	}
-	reqBodyJson, err := json.Marshal(reqBody)
+	reqBodyJSON, err := json.Marshal(reqBody)
 	if err != nil {
-		return nil, fmt.Errorf("error marshalling request body: %v", err)
+		return "", fmt.Errorf("error marshalling request body: %v", err)
 	}
 
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(reqBodyJson))
+	// Create the HTTP request
+	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(reqBodyJSON))
 	if err != nil {
-		return nil, fmt.Errorf("error creating request: %v", err)
+		return "", fmt.Errorf("error creating request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 
+	// Send the request
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("error making request: %v", err)
+		return "", fmt.Errorf("error making request: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func(Body io.ReadCloser) {
+		err := Body.Close()
+		if err != nil {
+			fmt.Println("Error closing response body:", err)
+		}
+	}(resp.Body)
 
+	// Read the response
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("error reading response body: %v", err)
+		return "", fmt.Errorf("error reading response body: %v", err)
 	}
 
-	// log the response
+	// Log the raw response
 	fmt.Println("Response from OpenAI:")
 	fmt.Println(string(respBody))
 
-	// Parse OpenAI response
+	// Parse the response into our struct
 	var openAIResponse OpenAIResponse
-	err = json.Unmarshal(respBody, &openAIResponse)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling response: %v", err)
+	if err := json.Unmarshal(respBody, &openAIResponse); err != nil {
+		return "", fmt.Errorf("error unmarshalling response: %v", err)
 	}
 
 	if len(openAIResponse.Choices) == 0 {
-		return nil, fmt.Errorf("no choices returned from OpenAI")
+		return "", fmt.Errorf("no choices returned from OpenAI")
 	}
 
-	// Extract variable names from the response
-	choiceText := openAIResponse.Choices[0].Message.Content
-	var result []string
-	err = json.Unmarshal([]byte(choiceText), &result)
+	// Return the raw content from the first choice
+	return openAIResponse.Choices[0].Message.Content, nil
+}
+
+// CallOpenAIString calls the API and returns the raw string response.
+func CallOpenAIString(prompt string, input interface{}) (string, error) {
+	return callOpenAIBase(prompt, input)
+}
+
+// CallOpenAIArray calls the API and unmarshals the JSON response into a slice of type T.
+func CallOpenAIArray[T any](prompt string, input interface{}) ([]T, error) {
+	content, err := callOpenAIBase(prompt, input)
 	if err != nil {
-		return nil, fmt.Errorf("error unmarshalling result: %v", err)
+		return nil, err
 	}
 
-	if len(result) != len(input) {
-		return nil, fmt.Errorf("number of results does not match number of inputs")
+	var result []T
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return nil, fmt.Errorf("error unmarshalling result into []T: %v", err)
+	}
+
+	return result, nil
+}
+
+// CallOpenAIObject calls the API and unmarshals the JSON response into an object of type T.
+func CallOpenAIObject[T any](prompt string, input interface{}) (T, error) {
+	var result T
+	content, err := callOpenAIBase(prompt, input)
+	if err != nil {
+		return result, err
+	}
+
+	if err := json.Unmarshal([]byte(content), &result); err != nil {
+		return result, fmt.Errorf("error unmarshalling result into T: %v", err)
 	}
 
 	return result, nil

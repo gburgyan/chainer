@@ -90,6 +90,9 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	// Replace chained values in the request headers
 	var headers []PostmanHeader
 	for _, header := range request.Entry.Request.Headers {
+		if shouldSkipHeader(header) {
+			continue
+		}
 		headers = append(headers, PostmanHeader{
 			Key:   header.Name,
 			Value: ReplaceValuesInString(header.Value, request.RequestChainedValues),
@@ -112,6 +115,20 @@ func ReplaceChainedValuesInRequest(request *CallDetails) PostmanRequest {
 	}
 
 	return postmanRequest
+}
+
+func shouldSkipHeader(header Header) bool {
+	// Skip headers that are automatically set by Postman
+	if strings.HasPrefix(header.Name, "Postman-") {
+		return true
+	}
+
+	// Skip Content-Length header
+	if header.Name == "Content-Length" {
+		return true
+	}
+
+	return false
 }
 
 // ReplaceValuesInString replaces all occurrences of specified values in an input string with corresponding Postman variable placeholders.
@@ -141,7 +158,7 @@ func BuildPostmanURL(callDetails *CallDetails) PostmanURL {
 	postmanURL := PostmanURL{
 		Raw:      ReplaceValuesInString(rawUrl, callDetails.RequestChainedValues),
 		Protocol: parsedURL.Scheme,
-		Host:     []string{parsedURL.Host},
+		Host:     []string{ReplaceValuesInString(parsedURL.Host, callDetails.RequestChainedValues)},
 	}
 
 	// Split the path into individual components
@@ -228,8 +245,10 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 	// Build JavaScript code to extract the value with error handling
 	jsPath := chainedValue.ReferencePath
 	scriptLines = append(scriptLines, "try {")
-	valueExtraction := fmt.Sprintf("  var %s = responseJson.%s;", collectionVarName, jsPath)
+
+	valueExtraction := fmt.Sprintf("  var %s = %s;", collectionVarName, jsPath)
 	scriptLines = append(scriptLines, valueExtraction)
+
 	setVariable := fmt.Sprintf("  pm.collectionVariables.set(\"%s\", %s);", collectionVarName, collectionVarName)
 	scriptLines = append(scriptLines, setVariable)
 	printToConsole := fmt.Sprintf("  console.log('Variable: %s, Value:', %s);", collectionVarName, collectionVarName)
@@ -248,7 +267,9 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*ChainedValueContext) PostmanCollection {
 	var items []PostmanItem
 
-	for _, callDetails := range callDetailsList {
+	initScript := CreateInitScript(chainedValues)
+
+	for i, callDetails := range callDetailsList {
 		if callDetails == nil {
 			continue
 		}
@@ -266,13 +287,12 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 		//}
 		events = append(events, script)
 
-		parsedUrl, err := url.Parse(callDetails.Entry.Request.URL)
-		if err != nil {
-			log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
-			continue
+		if i == 0 && initScript != nil {
+			events = append(events, *initScript)
 		}
+
 		item := PostmanItem{
-			Name:    fmt.Sprintf("Req %s", parsedUrl.Path),
+			Name:    callDetails.Name,
 			Request: postmanRequest,
 			Event:   events,
 		}
@@ -281,10 +301,17 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 
 	variables := make([]PostmanVariable, len(chainedValues))
 	for i, chainedValue := range chainedValues {
+		var description string
+		if chainedValue.ValueSource != nil {
+			description = chainedValue.ValueSource.ReferencePath
+		} else {
+			description = "Manually set variable"
+		}
+
 		variables[i] = PostmanVariable{
 			Key: chainedValue.VariableName,
 			//Value: fmt.Sprintf("%v", chainedValue.Value),
-			Description: chainedValue.ValueSource.ReferencePath,
+			Description: description,
 		}
 	}
 
@@ -299,6 +326,41 @@ func BuildPostmanCollection(callDetailsList []*CallDetails, chainedValues []*Cha
 	}
 
 	return collection
+}
+
+func CreateInitScript(values []*ChainedValueContext) *PostmanEvent {
+	var scriptLines []string
+	scriptLines = append(scriptLines, "var result = {};")
+
+	for _, chainedValue := range values {
+		collectionVarName := chainedValue.VariableName
+
+		if chainedValue.InitScript != "" {
+			scriptLines = append(scriptLines, "try {")
+			scriptLines = append(scriptLines, chainedValue.InitScript)
+
+			setVariable := fmt.Sprintf("  pm.collectionVariables.set(\"%s\", result);", collectionVarName)
+			scriptLines = append(scriptLines, setVariable)
+			printToConsole := fmt.Sprintf("  console.log('Variable: %s, Value:' + result);", collectionVarName)
+			scriptLines = append(scriptLines, printToConsole)
+			scriptLines = append(scriptLines, "} catch (e) {")
+			logError := fmt.Sprintf("  console.error('Error extracting variable %s:', e);", collectionVarName)
+			scriptLines = append(scriptLines, logError)
+			scriptLines = append(scriptLines, "}")
+		}
+	}
+
+	if len(scriptLines) == 0 {
+		return nil
+	}
+
+	return &PostmanEvent{
+		Listen: "prerequest",
+		Script: PostmanEventScript{
+			Type: "text/javascript",
+			Exec: scriptLines,
+		},
+	}
 }
 
 // WriteCollectionToFile serializes the Postman collection into JSON format with proper indentation.

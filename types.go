@@ -36,6 +36,8 @@ const (
 // chained values that have been identified for potential variable substitution.
 // Additionally, it maintains a reference to the original HAR entry.
 type CallDetails struct {
+	Name string `json:"name"`
+
 	// RequestDetails contains all the value references extracted from the request.
 	RequestDetails []*ValueReference `json:"request_details"`
 
@@ -106,4 +108,10 @@ type ChainedValueContext struct {
 
 	// VariableName is an optional name assigned to the value for substitution purposes.
 	VariableName string
+
+	// True if this was a manually added variable
+	ExternalSource bool
+
+	// Initialization script for the variable (if applicable)
+	InitScript string
 }

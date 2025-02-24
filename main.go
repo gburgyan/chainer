@@ -1,20 +1,27 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strings"
-
-	"gopkg.in/yaml.v2"
 )
 
 // flags holds the parsed command-line flag values.
 type flags struct {
 	harFilePath  string
 	varsFilePath string
+	outputPath   string
+}
+
+type varsInput struct {
+	Name              string `json:"name"`
+	SearchValue       string `json:"search_value"`
+	InitializerPrompt string `json:"initializer,omitempty"`
 }
 
 func main() {
@@ -39,19 +46,21 @@ func run() error {
 
 	// Identify and process chained values.
 	chainedValues := findChainedValues(callDetailsList)
-	logInitialChainedValues(chainedValues)
-	repopulateCallDetails(chainedValues)
-	assignVariableNames(chainedValues)
-
 	// Optionally substitute pre-defined variables from a YAML file.
 	if f.varsFilePath != "" {
-		predefinedVars := loadYAMLVars(f.varsFilePath)
-		substitutePredefinedVariables(callDetailsList, predefinedVars)
+		predefinedVars := loadJSONVars(f.varsFilePath)
+		chainedValues = extractPredefinedVars(callDetailsList, predefinedVars, chainedValues)
 	}
+
+	logInitialChainedValues(chainedValues)
+	repopulateCallDetails(chainedValues)
+	updateComplexPaths(chainedValues)
+	WithRetries(assignVariableNames, 3)(chainedValues)
+	WithRetries(assignCallDetailNames, 3)(callDetailsList)
 
 	// Build the Postman collection and write it to a file.
 	collection := BuildPostmanCollection(callDetailsList, chainedValues)
-	if err := WriteCollectionToFile(collection, "collection.json"); err != nil {
+	if err := WriteCollectionToFile(collection, f.outputPath); err != nil {
 		return fmt.Errorf("error writing Postman collection: %w", err)
 	}
 
@@ -59,10 +68,96 @@ func run() error {
 	return nil
 }
 
+// CallNameRequest holds the URL and sequence number for naming a call.
+type CallNameRequest struct {
+	URL      string `json:"url"`
+	Sequence int    `json:"sequence"`
+}
+
+// CallNameResponse represents the AI-generated name.
+type CallNameResponse struct {
+	Name string `json:"name"`
+}
+
+// assignCallDetailNames uses the OpenAI API to generate descriptive call names based on the URL and the sequence of the calls.
+func assignCallDetailNames(list []*CallDetails) error {
+	var requests []CallNameRequest
+	for i, callDetails := range list {
+		// Parse the URL for validation.
+		parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+		if err != nil {
+			log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+			continue
+		}
+		requests = append(requests, CallNameRequest{
+			URL:      parsedURL.String(),
+			Sequence: i + 1,
+		})
+	}
+
+	prompt := `
+I have a list of API calls with their URLs and a sequence number indicating the order in which they occur.
+For each call, please provide a concise and descriptive name that reflects the endpoint and order.
+The input is an array of objects with "url" and "sequence".
+
+These are all calls made to the Travelport JSON API, so use the knowledge you have to come up with good names.
+
+Return an array of objects with the call name in the field "name", ensuring that the names are clear as they will be seen by users.
+There may be multiple instances of the same call. Always return something for each call -- they may be the same name if appropriate.
+
+Return the raw JSON array of objects with no commentary, formatting, or markup.
+
+The format of the result should be:
+[
+  {
+	"name": "Name of the first call"
+  },
+  ...repeat for each call...
+]
+`
+	responses, err := CallOpenAIArray[CallNameResponse](prompt, requests)
+	if err != nil {
+		// Fall back to using the URL's path if the AI call fails.
+		for _, callDetails := range list {
+			parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+			if err != nil {
+				log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+				continue
+			}
+			callDetails.Name = parsedURL.Path
+		}
+		log.Printf("Error calling OpenAI: %v", err)
+		return errors.New("error calling OpenAI")
+	}
+
+	// Ensure there is a 1:1 correspondence between the input and the response.
+	if len(responses) != len(requests) {
+		log.Printf("Mismatched response count from OpenAI, falling back to URL path names")
+		for _, callDetails := range list {
+			parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
+			if err != nil {
+				log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
+				return errors.New("error parsing URL")
+			}
+			callDetails.Name = parsedURL.Path
+		}
+		return errors.New("mismatched response count from OpenAI")
+	}
+
+	// Assign the AI-generated names to the respective call details.
+	for i, callDetails := range list {
+		callDetails.Name = responses[i].Name
+	}
+
+	return nil
+}
+
 // parseFlags extracts and validates command-line flags.
 func parseFlags() (flags, error) {
 	harFilePath := flag.String("file", "", "Path to the HAR file")
 	varsFilePath := flag.String("vars", "", "Path to the YAML file with pre-defined variables")
+	outputPath := flag.String("output", "collection.json", "Output path for the generated Postman collection")
+
 	flag.Parse()
 
 	if *harFilePath == "" {
@@ -74,6 +169,7 @@ func parseFlags() (flags, error) {
 	return flags{
 		harFilePath:  *harFilePath,
 		varsFilePath: *varsFilePath,
+		outputPath:   *outputPath,
 	}, nil
 }
 
@@ -101,9 +197,9 @@ func (r *ValueReference) IsInteresting() bool {
 	case string:
 		return len(v) >= 2
 	case int:
-		return v > 1000
+		return v >= 100
 	case float64:
-		return v > 1000.0
+		return v >= 100.0
 	}
 	return false
 }
@@ -213,49 +309,57 @@ func repopulateCallDetails(chainedValues []*ChainedValueContext) {
 	}
 }
 
-// substitutePredefinedVariables walks through all value references in the provided call details and,
+// extractPredefinedVars walks through all value references in the provided call details and,
 // if the value exactly matches a pre-defined variable value from the YAML file, replaces it with a variable reference.
 // For example, if the YAML file defines: username: admin, then a literal "admin" will be replaced with "{{username}}".
-func substitutePredefinedVariables(callDetailsList []*CallDetails, vars map[string]string) {
-	for _, cd := range callDetailsList {
-		for _, vr := range cd.RequestDetails {
-			substituteValue(vr, vars)
+func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, values []*ChainedValueContext) []*ChainedValueContext {
+	// Make a copy of the values to avoid modifying the original slice
+	resultValues := make([]*ChainedValueContext, len(values))
+	copy(resultValues, values)
+
+	for _, v := range vars {
+		manualChainedValue := &ChainedValueContext{
+			Value:          v.SearchValue,
+			ExternalSource: true,
+			VariableName:   v.Name,
+			InitScript:     v.InitializerPrompt,
 		}
-		for _, vr := range cd.ResponseDetails {
-			substituteValue(vr, vars)
+		found := false
+		for _, cd := range callDetailsList {
+			for _, vr := range cd.RequestDetails {
+				found = addPredefinedUseIfFound(manualChainedValue, vr) || found
+			}
+		}
+		if found {
+			resultValues = append(resultValues, manualChainedValue)
 		}
 	}
+
+	return resultValues
 }
 
-// substituteValue checks if the value in the ValueReference is a string and,
+// addPredefinedUseIfFound checks if the value in the ValueReference is a string and,
 // if it exactly matches one of the pre-defined values, replaces it with a variable placeholder.
-func substituteValue(vr *ValueReference, vars map[string]string) {
+func addPredefinedUseIfFound(cv *ChainedValueContext, vr *ValueReference) bool {
 	str, ok := vr.Value.(string)
 	if !ok {
-		return
+		return false
 	}
-	for varName, varVal := range vars {
-		if str == varVal {
-			vr.Value = fmt.Sprintf("{{%s}}", varName)
-			// Once a match is found, no need to check the other variables.
-			break
-		}
+	if str == cv.Value {
+		cv.AllUsages = append(cv.AllUsages, vr)
+		return true
 	}
+	return false
 }
 
-// loadYAMLVars reads the YAML file at the given path and unmarshals it into a map[string]string.
-// The YAML file should contain key-value pairs like:
-//
-//	username: admin
-//	password: secret
-func loadYAMLVars(filePath string) map[string]string {
+func loadJSONVars(filePath string) []varsInput {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
-		log.Fatalf("Error reading YAML file: %v", err)
+		log.Fatalf("Error reading JSON file: %v", err)
 	}
-	var vars map[string]string
-	if err := yaml.Unmarshal(data, &vars); err != nil {
-		log.Fatalf("Error parsing YAML file: %v", err)
+	var vars []varsInput
+	if err := json.Unmarshal(data, &vars); err != nil {
+		log.Fatalf("Error parsing JSON file: %v", err)
 	}
 	return vars
 }
