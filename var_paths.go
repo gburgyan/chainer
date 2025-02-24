@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/google/uuid"
 	"log"
 	"strings"
 )
@@ -34,7 +33,7 @@ func updateComplexPaths(values []*ChainedValueContext) {
 		}
 
 		// Prune the JSON to get only the partial structure
-		prunedJSON, err := extractPartialJSON(rawJSON, chainedVal.ValueSource.ReferencePath, 30)
+		prunedJSON, err := extractPartialJSON(rawJSON, chainedVal.ValueSource.ReferencePath, 50)
 		if err != nil {
 			log.Printf("updateComplexPaths: error extracting partial JSON: %v", err)
 			continue
@@ -48,7 +47,7 @@ func updateComplexPaths(values []*ChainedValueContext) {
 			URL:         respEntry.Request.URL,
 			CurrentPath: chainedVal.ValueSource.ReferencePath,
 			PartialJSON: prunedJSON,
-			Value:       chainedVal.Value,
+			//Value:       chainedVal.Value,
 		}
 
 		for _, usage := range chainedVal.AllUsages {
@@ -86,20 +85,25 @@ type ComplexPathRequest struct {
 	CurrentPath string      `json:"current_path"`
 	UsagePaths  []string    `json:"usage_paths"`
 	PartialJSON interface{} `json:"partial_json"`
-	Value       string      `json:"value"`
+	Value       string      `json:"value,omitempty"`
 }
 
 // buildComplexPathPrompt builds the user message for OpenAI asking it to produce
 // either a simple JSON expression or a JSONPath for the value if the structure is complicated.
 func buildComplexPathPrompt() string {
 	return `
-We have a JSON snippet ("partial_json"), a path ("current_path"), and a value ("value").
-We want a stable expression that reliably finds this value, even if the JSON structure changes.
-- If a simple object/array syntax (e.g. foo.bar[0].baz) is stable, just return that.
-- If array positions can vary or the structure is more complex, return a robust JSONPath expression.
-- Rewrite array indices to [0] only if it doesn’t change which item we need.
-- Consider "usage_paths" (future usage) to ensure we pick the correct element.
-Return only the final path or JSONPath expression, with no extra explanation or markup.
+You are provided with the following inputs:
+- partial_json: a snippet of JSON data.
+- current_path: a candidate JSON path.
+- usage_paths: additional JSON paths used elsewhere.
+
+Your task is to generate a single, stable JSON path expression that reliably retrieves the target value from the parsed JSON (represented by the variable responseJson). Follow these rules:
+1. Use only the variable "responseJson" in your expression.
+2. If a simple dot/bracket notation (e.g. responseJson.foo.bar[0].baz) works reliably, return that.
+3. If the JSON structure is complex or array indices may vary, return a robust JSONPath expression in the form of jsonpath.query(responseJson, 'PATH').
+4. DO NOT include the placeholder string "NODE-TO-GET" in your results! It is only a placeholder and will not be present in the actual JSON.
+5. Ensure that the path, when applied to the sample, returns the target value that is designated by the placeholder "NODE-TO-GET" and current path.
+6. Return ONLY the raw JSON path expression without any explanation, comments, markdown, or extra text.
 `
 }
 
@@ -124,7 +128,8 @@ func extractPartialJSON(source string, targetPath string, linesToKeep int) (stri
 	}
 
 	// 2) Make semaphore value: a new GUID.
-	semaphore := uuid.New().String()
+	//semaphore := uuid.New().String()
+	semaphore := ">>NODE-TO-GET<<"
 
 	// 3) Replace the value at the target path with the semaphore value.
 	tokens, err := splitPathTokens(targetPath)

@@ -19,7 +19,7 @@ type VariableGeneratorResponse struct {
 // assignVariableNames assigns descriptive variable names to each chained value.
 // It prepares input data based on the origin request URL and response path of each value.
 // It calls the OpenAI API to generate meaningful names following best practices and updates each ChainedValueContext.
-func assignVariableNames(chainedValues []*ChainedValueContext) {
+func assignVariableNames(chainedValues []*ChainedValueContext) error {
 
 	var variableNames []VariableGenerator
 	for _, cv := range chainedValues {
@@ -83,10 +83,13 @@ Please return a completely undecorated JSON response with just the array of obje
 
 	if err != nil {
 		log.Fatalf("Error calling OpenAI: %v", err)
+		return err
 	}
 
 	// Assign variable names
 	for i, value := range chainedValues {
 		value.VariableName = res[i].VariableName
 	}
+
+	return nil
 }

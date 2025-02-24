@@ -158,7 +158,7 @@ func BuildPostmanURL(callDetails *CallDetails) PostmanURL {
 	postmanURL := PostmanURL{
 		Raw:      ReplaceValuesInString(rawUrl, callDetails.RequestChainedValues),
 		Protocol: parsedURL.Scheme,
-		Host:     []string{parsedURL.Host},
+		Host:     []string{ReplaceValuesInString(parsedURL.Host, callDetails.RequestChainedValues)},
 	}
 
 	// Split the path into individual components
@@ -245,14 +245,10 @@ func buildScriptForVariable(chainedValue *ValueReference) []string {
 	// Build JavaScript code to extract the value with error handling
 	jsPath := chainedValue.ReferencePath
 	scriptLines = append(scriptLines, "try {")
-	// If the jspath contains a $ sign, it is a JSONPath expression
-	if strings.Contains(jsPath, "$") {
-		valueExtraction := fmt.Sprintf("  var %s = jsonpath.query(responseJson, %s)[0];", collectionVarName, jsPath)
-		scriptLines = append(scriptLines, valueExtraction)
-	} else {
-		valueExtraction := fmt.Sprintf("  var %s = responseJson.%s;", collectionVarName, jsPath)
-		scriptLines = append(scriptLines, valueExtraction)
-	}
+
+	valueExtraction := fmt.Sprintf("  var %s = %s;", collectionVarName, jsPath)
+	scriptLines = append(scriptLines, valueExtraction)
+
 	setVariable := fmt.Sprintf("  pm.collectionVariables.set(\"%s\", %s);", collectionVarName, collectionVarName)
 	scriptLines = append(scriptLines, setVariable)
 	printToConsole := fmt.Sprintf("  console.log('Variable: %s, Value:', %s);", collectionVarName, collectionVarName)

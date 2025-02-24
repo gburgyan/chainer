@@ -19,7 +19,7 @@ type OpenAIMessage struct {
 type OpenAIRequest struct {
 	Model     string          `json:"model"`
 	Messages  []OpenAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens"`
+	MaxTokens int             `json:"max_tokens,omitempty"`
 }
 
 // OpenAIChoice represents one of the choices in the OpenAI API response.
@@ -50,7 +50,7 @@ func callOpenAIBase(prompt string, input interface{}) (string, error) {
 	// Prepare the messages
 	messages := []OpenAIMessage{
 		{
-			Role:    "system",
+			Role:    "user",
 			Content: "You are an assistant that takes the input request and performs a simple request.",
 		},
 		{
@@ -69,9 +69,12 @@ func callOpenAIBase(prompt string, input interface{}) (string, error) {
 
 	// Create the OpenAI request body
 	reqBody := OpenAIRequest{
-		Model:     "gpt-4o-mini",
-		Messages:  messages,
-		MaxTokens: 10000,
+		//Model: "o3-mini",
+		//Model: "o1-mini",
+		Model: "gpt-4o-mini",
+		//Model:     "gpt-4o",
+		Messages: messages,
+		//MaxTokens: 16384,
 	}
 	reqBodyJSON, err := json.Marshal(reqBody)
 	if err != nil {

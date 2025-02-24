@@ -55,8 +55,8 @@ func run() error {
 	logInitialChainedValues(chainedValues)
 	repopulateCallDetails(chainedValues)
 	updateComplexPaths(chainedValues)
-	assignVariableNames(chainedValues)
-	assignCallDetailNames(callDetailsList)
+	WithRetries(assignVariableNames, 3)(chainedValues)
+	WithRetries(assignCallDetailNames, 3)(callDetailsList)
 
 	// Build the Postman collection and write it to a file.
 	collection := BuildPostmanCollection(callDetailsList, chainedValues)
@@ -80,7 +80,7 @@ type CallNameResponse struct {
 }
 
 // assignCallDetailNames uses the OpenAI API to generate descriptive call names based on the URL and the sequence of the calls.
-func assignCallDetailNames(list []*CallDetails) {
+func assignCallDetailNames(list []*CallDetails) error {
 	var requests []CallNameRequest
 	for i, callDetails := range list {
 		// Parse the URL for validation.
@@ -104,7 +104,8 @@ These are all calls made to the Travelport JSON API, so use the knowledge you ha
 
 Return an array of objects with the call name in the field "name", ensuring that the names are clear as they will be seen by users.
 There may be multiple instances of the same call. Always return something for each call -- they may be the same name if appropriate.
-Return the raw JSON array of objects with no commentary or formatting.
+
+Return the raw JSON array of objects with no commentary, formatting, or markup.
 
 The format of the result should be:
 [
@@ -126,7 +127,7 @@ The format of the result should be:
 			callDetails.Name = parsedURL.Path
 		}
 		log.Printf("Error calling OpenAI: %v", err)
-		return
+		return errors.New("error calling OpenAI")
 	}
 
 	// Ensure there is a 1:1 correspondence between the input and the response.
@@ -136,17 +137,19 @@ The format of the result should be:
 			parsedURL, err := url.Parse(callDetails.Entry.Request.URL)
 			if err != nil {
 				log.Printf("Error parsing URL %s: %v", callDetails.Entry.Request.URL, err)
-				continue
+				return errors.New("error parsing URL")
 			}
 			callDetails.Name = parsedURL.Path
 		}
-		return
+		return errors.New("mismatched response count from OpenAI")
 	}
 
 	// Assign the AI-generated names to the respective call details.
 	for i, callDetails := range list {
 		callDetails.Name = responses[i].Name
 	}
+
+	return nil
 }
 
 // parseFlags extracts and validates command-line flags.
@@ -194,9 +197,9 @@ func (r *ValueReference) IsInteresting() bool {
 	case string:
 		return len(v) >= 2
 	case int:
-		return v > 1000
+		return v >= 100
 	case float64:
-		return v > 1000.0
+		return v >= 100.0
 	}
 	return false
 }
@@ -324,10 +327,7 @@ func extractPredefinedVars(callDetailsList []*CallDetails, vars []varsInput, val
 		found := false
 		for _, cd := range callDetailsList {
 			for _, vr := range cd.RequestDetails {
-				found = addPredefinedUseIfFound(manualChainedValue, vr)
-				if found {
-					found = true
-				}
+				found = addPredefinedUseIfFound(manualChainedValue, vr) || found
 			}
 		}
 		if found {
