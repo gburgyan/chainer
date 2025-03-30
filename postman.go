@@ -207,7 +207,27 @@ func BuildPostmanURL(callDetails *CallDetails) PostmanURL {
 // It creates JavaScript code that retrieves values from the response JSON and sets them as collection variables.
 func CreateTestScript(chainedValues []*ValueReference) PostmanEvent {
 	var scriptLines []string
-	scriptLines = append(scriptLines, "var responseJson = pm.response.json();")
+
+	scriptLines = append(scriptLines, "// Verify response status code is not 4xx or 5xx")
+	scriptLines = append(scriptLines, "pm.test('Response status code should be 2xx or 3xx', function() {")
+	scriptLines = append(scriptLines, "  console.log('Status code:', pm.response.code);")
+	scriptLines = append(scriptLines, "  if (pm.response.code >= 400) {")
+	scriptLines = append(scriptLines, "    console.error('Request failed with status:', pm.response.code);")
+	scriptLines = append(scriptLines, "    console.log('Response body:', pm.response.text());")
+	scriptLines = append(scriptLines, "    pm.expect(pm.response.code).to.be.below(400);")
+	scriptLines = append(scriptLines, "  }")
+	scriptLines = append(scriptLines, "});")
+	scriptLines = append(scriptLines, "")
+
+	scriptLines = append(scriptLines, "try {")
+	scriptLines = append(scriptLines, "  var responseJson = pm.response.json();")
+	scriptLines = append(scriptLines, "} catch (e) {")
+	scriptLines = append(scriptLines, "  console.error('Failed to parse response as JSON:', e);")
+	scriptLines = append(scriptLines, "  console.log('Raw response:', pm.response.text());")
+	scriptLines = append(scriptLines, "  pm.test('Response should be valid JSON', function() {")
+	scriptLines = append(scriptLines, "    pm.expect(false).to.be.true;")
+	scriptLines = append(scriptLines, "  });")
+	scriptLines = append(scriptLines, "}")
 
 	usedVariables := make(map[string]bool)
 
