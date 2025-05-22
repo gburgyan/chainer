@@ -1,4 +1,8 @@
-package main
+package util
+
+import (
+	"strings"
+)
 
 // SourceType represents the origin of a value extracted from an HTTP transaction.
 // It indicates whether the value was found in the request or in the response.
@@ -45,8 +49,7 @@ type CallDetails struct {
 	ResponseDetails []*ValueReference `json:"response_details"`
 
 	// Entry holds the raw HAR entry for this call.
-	// TODO: An Entry should be more generic and not tied to HAR.
-	Entry *Entry `json:"entry"`
+	Entry interface{} `json:"entry"`
 
 	// RequestChainedValues contains value references in the request that have been
 	// identified as being part of a variable chaining scenario.
@@ -73,7 +76,6 @@ type ValueReference struct {
 	UrlLocation int `json:"url_location"`
 
 	// HeaderName is the name of the header where the value was extracted.
-	// TODO: Remove this field
 	HeaderName string `json:"header_name"`
 
 	// Source points to the CallDetails from which this value was extracted.
@@ -90,6 +92,37 @@ type ValueReference struct {
 
 	// Ancestors contains a list of parent objects leading to this value (used when flattening JSON).
 	Ancestors []interface{}
+}
+
+// IsInteresting determines whether a ValueReference is significant for chaining.
+// It filters out values that are nil, too short (for strings), or below a threshold (for numbers).
+// It also excludes specific headers and JSON properties that are not useful for variable substitution.
+func (r *ValueReference) IsInteresting() bool {
+	if r.Value == nil {
+		return false
+	}
+
+	if r.ReferencePath != "" && strings.Contains(r.ReferencePath, "@type") {
+		return false
+	}
+
+	if r.HeaderName == "Content-Type" {
+		return false
+	}
+
+	// If it's a string, make sure it's at least 2 characters long
+	// If it's an int, make sure it's greater than 1000
+	// If it's a float, make sure it's greater than 1000.0
+
+	switch v := r.Value.(type) {
+	case string:
+		return len(v) >= 2
+	case int:
+		return v >= 100
+	case float64:
+		return v >= 100.0
+	}
+	return false
 }
 
 // ChainedValueContext holds information about a value that is shared across

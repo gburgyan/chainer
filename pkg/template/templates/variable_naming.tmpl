@@ -1,50 +1,3 @@
-package main
-
-import (
-	"log"
-)
-
-type VariableGenerator struct {
-	OriginRequestUrl  string `json:"origin_request_url"`
-	ResponsePath      string `json:"response_path"`
-	ExampleValue      string `json:"example_value,omitempty"`
-	InitializerPrompt string `json:"initializer_prompt,omitempty"`
-	ProposedName      string `json:"proposed_name,omitempty"`
-}
-
-type VariableGeneratorResponse struct {
-	VariableName string `json:"name"`
-}
-
-// assignVariableNames assigns descriptive variable names to each chained value.
-// It prepares input data based on the origin request URL and response path of each value.
-// It calls the OpenAI API to generate meaningful names following best practices and updates each ChainedValueContext.
-func assignVariableNames(chainedValues []*ChainedValueContext) error {
-
-	var variableNames []VariableGenerator
-	for _, cv := range chainedValues {
-		// Ensure value isn't longer than 50 chars
-		val := cv.Value
-		if len(val) > 50 {
-			val = val[:50]
-		}
-		vg := VariableGenerator{
-			ExampleValue:      val,
-			InitializerPrompt: cv.InitScript,
-			ProposedName:      cv.VariableName,
-		}
-		if cv.ValueSource == nil {
-			vg.OriginRequestUrl = cv.AllUsages[0].Source.Entry.Request.URL
-			vg.ResponsePath = cv.AllUsages[0].ReferencePath
-		} else {
-			vg.OriginRequestUrl = cv.ValueSource.Source.Entry.Request.URL
-			vg.ResponsePath = cv.ValueSource.ReferencePath
-		}
-
-		variableNames = append(variableNames, vg)
-	}
-
-	res, err := CallOpenAIArray[VariableGeneratorResponse](`
 # Role and Objective
 You are a variable naming expert for API data extraction in Postman collections. Your task is to generate descriptive, best-practice variable names for values extracted from API responses.
 
@@ -81,12 +34,12 @@ Input:
         "proposed_name": "departureTime"
     },
     {
-        "origin_request_url": "https://{{baseURL}}/11/air/book/airoffer/reservationworkbench/{{reservationValue}}/offers/buildfromcatalogproductoffering",
+        "origin_request_url": "https://api.example.com/11/air/book/airoffer/reservationworkbench/12345/offers/buildfromcatalogproductoffering",
         "response_path": "OfferListResponse.OfferID[0].Identifier.value",
         "example_value": "o21"
     },
     {
-        "origin_request_url": "https://{{baseURL}}/11/air/book/reservation/reservations/{{confirmationLocator}}",
+        "origin_request_url": "https://api.example.com/11/air/book/reservation/reservations/ABC123",
         "response_path": "ReservationResponse.Reservation.Offer[0].Price.CurrencyCode.value",
         "example_value": "USD"
     }
@@ -112,17 +65,3 @@ collection with Postman environment variables, making the collection more dynami
 # Final instructions
 There must be a 1:1 correspondence between input and output arrays - every input must have a corresponding output. Return only raw JSON
 without any explanations or decorations.
-`, variableNames)
-
-	if err != nil {
-		log.Fatalf("Error calling OpenAI: %v", err)
-		return err
-	}
-
-	// Assign variable names
-	for i, value := range chainedValues {
-		value.VariableName = res[i].VariableName
-	}
-
-	return nil
-}

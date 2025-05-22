@@ -1,4 +1,4 @@
-package main
+package util
 
 import (
 	"fmt"
@@ -45,6 +45,17 @@ func WithRetries[T any](f T, retries int) T {
 				}
 				// No more retries left
 				if hasError {
+					// Create a return value slice with the appropriate types
+					callOut = make([]reflect.Value, outCount)
+					
+					// Initialize the return values to their zero values
+					for j := 0; j < outCount; j++ {
+						if j == errorIndex {
+							continue // Skip the error for now
+						}
+						callOut[j] = reflect.Zero(ft.Out(j))
+					}
+					
 					// Fill the error return with the panic as an error
 					panicErr := fmt.Errorf("panic recovered: %v", panicVal)
 					callOut[errorIndex] = reflect.ValueOf(panicErr)

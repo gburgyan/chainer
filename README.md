@@ -42,6 +42,16 @@ The variables file should contain an array of objects with the following structu
 ]
 ```
 
+## Project Structure
+
+The project is organized into several packages:
+
+- `cmd` - Command-line application code
+- `pkg/har` - HAR file processing and parsing
+- `pkg/util` - Core domain types and chain finding logic
+- `pkg/postman` - Postman collection generation
+- `pkg/ai` - OpenAI integration for naming
+
 ## How It Works
 
 1. Parses the HAR file to extract HTTP requests and responses
@@ -54,6 +64,20 @@ The variables file should contain an array of objects with the following structu
 ## Dependencies
 
 - OpenAI API for intelligent naming (requires an `OPENAI_API_KEY` environment variable)
+
+## Development
+
+### Running Tests
+
+```bash
+go test ./...
+```
+
+### Building
+
+```bash
+go build -o chainer .
+```
 
 ## Example
 

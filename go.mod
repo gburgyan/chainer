@@ -1,4 +1,4 @@
-module chainer
+module github.com/gburgyan/chainer
 
 go 1.20
 
