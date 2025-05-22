@@ -45,41 +45,74 @@ func assignVariableNames(chainedValues []*ChainedValueContext) error {
 	}
 
 	res, err := CallOpenAIArray[VariableGeneratorResponse](`
-I want you to come up with good variable names and optional initializers for values retrieved from an API.
-Please ensure each variable name is descriptive and follows best practices and is unique, but don't be overly verbose.
-Don't include things like "identifier" or "value" in the name unless it's critical to the naming, just the most descriptive
-part as a human would name it.
+# Role and Objective
+You are a variable naming expert for API data extraction in Postman collections. Your task is to generate descriptive, best-practice variable names for values extracted from API responses.
 
-The API is the Travelport JSON API. Use the knowledge of the API to come up with good names.
+# Instructions
+Create meaningful variable names for values retrieved from API responses. These names will be used in a Postman collection to store values extracted from responses and used in subsequent requests.
 
-The response should be an array of objects with each object containing the variable name and an optional initialization script if it is applicable. There
-needs to be a variable called "result" that holds the final result of the script. This will be executed in a JavaScript environment in the Postman collection.
-It will be run inside of a braced block, but do not include the braces in the response.
+## Naming Conventions
+- Make each variable name descriptive and follow JavaScript naming best practices
+- Ensure all names are unique within the collection
+- Be concise but clear - avoid being overly verbose
+- Don't include generic terms like "identifier" or "value" unless critical to understanding
+- Focus on the most descriptive part as a human would naturally name it
+- If a proposed name is provided, use that as the variable name
 
-An example of the input data is an array of objects like this:
+# Reasoning Steps
+1. Analyze the origin request URL to understand the API endpoint context
+2. Consider the JSON path to understand where in the response the value comes from
+3. Review the example value to understand the data type and content
+4. Check if a proposed name is already provided and use it if available
+5. Ensure the name is unique among all variables in the collection
 
+# Output Format
+Return an array of objects with a 1:1 correspondence to the input array. Each object should contain a "name" property with the variable name.
+The response must be a completely undecorated JSON array.
+
+# Examples
+## Example 1
+Input:
 [
+    {
+        "origin_request_url": "https://api.travelport.com/v1/air/flight",
+        "response_path": "$.data.flights[0].segments[0].departure_time",
+        "example_value": "2025-01-02",
+        "proposed_name": "departureTime"
+    },
+    {
+        "origin_request_url": "https://{{baseURL}}/11/air/book/airoffer/reservationworkbench/{{reservationValue}}/offers/buildfromcatalogproductoffering",
+        "response_path": "OfferListResponse.OfferID[0].Identifier.value",
+        "example_value": "o21"
+    },
+    {
+        "origin_request_url": "https://{{baseURL}}/11/air/book/reservation/reservations/{{confirmationLocator}}",
+        "response_path": "ReservationResponse.Reservation.Offer[0].Price.CurrencyCode.value",
+        "example_value": "USD"
+    }
+]
+
+Output:
+[
+    {
+        "name": "departureTime",
+    },
 	{
-		  "origin_request_url": "https://api.travelport.com/v1/air/flight",
-		  "response_path": "$.data.flights[0].segments[0].departure_time",
-		  "example_value": "2025-01-02",
-	      "proposed_name": "departureTime"
+		"name": "offerIdentifier",
+	},
+	{
+		"name": "reservationOfferCurrency",
 	}
 ]
 
-The format of the response should be an array of objects like this:
+# Context
+This naming task is part of a HAR to Postman Collection converter. The variable names you create will be used to replace hardcoded values in the
+collection with Postman environment variables, making the collection more dynamic and reusable.
 
-[
-	{
-		"name": "departureTime",
-	}, ...
-]
-
-If a proposed name is provided, please use that as the variable name (and also return it)
-Ensure that there are no conflicts with other variable names.
-There should be a 1:1 correspondence between the input and output arrays. Every input *must* have a corresponding output.
-
-Please return a completely undecorated JSON response with just the array of objects.`, variableNames)
+# Final instructions
+There must be a 1:1 correspondence between input and output arrays - every input must have a corresponding output. Return only raw JSON
+without any explanations or decorations.
+`, variableNames)
 
 	if err != nil {
 		log.Fatalf("Error calling OpenAI: %v", err)

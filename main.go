@@ -96,24 +96,60 @@ func assignCallDetailNames(list []*CallDetails) error {
 	}
 
 	prompt := `
-I have a list of API calls with their URLs and a sequence number indicating the order in which they occur.
-For each call, please provide a concise and descriptive name that reflects the endpoint and order.
-The input is an array of objects with "url" and "sequence".
+# Role and Objective
+You are an API endpoint naming specialist for Postman collections. Your task is to generate concise, descriptive names for API calls based on their URLs and sequence in a workflow.
 
-These are all calls made to the Travelport JSON API, so use the knowledge you have to come up with good names.
+# Instructions
+For each API call in the provided list, create a clear, user-friendly name that accurately reflects the endpoint's purpose and its position in the sequence of API operations.
 
-Return an array of objects with the call name in the field "name", ensuring that the names are clear as they will be seen by users.
-There may be multiple instances of the same call. Always return something for each call -- they may be the same name if appropriate.
+## Naming Guidelines
+- Create concise yet descriptive names
+- Reflect both the endpoint's purpose and its order in the sequence
+- Ensure names are intuitive for users viewing the collection
+- Use consistent naming patterns for similar endpoints
+- For repeated calls to the same endpoint, you may use the same name if appropriate
 
-Return the raw JSON array of objects with no commentary, formatting, or markup.
+# Reasoning Steps
+1. Analyze the URL structure to identify the API resource or action
+2. Consider the sequence number to understand where this call fits in the workflow
+3. Extract meaningful parts from the URL path that indicate purpose
+4. Use domain knowledge of the Travelport API to inform naming choices
+5. Format the name to be concise but clear for end-users
 
-The format of the result should be:
+# Output Format
+Return an array of objects, with each object containing a "name" property. The response must be a raw JSON array with no commentary or additional formatting.
+
+# Examples
+## Example 1
+Input:
 [
   {
-	"name": "Name of the first call"
+    "url": "https://api.travelport.com/v1/air/search",
+    "sequence": 1
   },
-  ...repeat for each call...
+  {
+    "url": "https://api.travelport.com/v1/air/price",
+    "sequence": 2
+  }
 ]
+
+Output:
+[
+  {
+    "name": "Air Search"
+  },
+  {
+    "name": "Air Price"
+  }
+]
+
+# Context
+This naming is part of a HAR to Postman Collection converter. The names you generate will be displayed in the Postman collection
+sidebar and will help users understand the purpose of each request in the workflow.
+
+# Final instructions
+Always provide a name for every call in the input list. There must be a 1:1 correspondence between the input array and output
+array and the ordering MUST be preserved. Return only the raw JSON array without any explanations or decorations.
 `
 	responses, err := CallOpenAIArray[CallNameResponse](prompt, requests)
 	if err != nil {

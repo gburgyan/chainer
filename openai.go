@@ -71,7 +71,9 @@ func callOpenAIBase(prompt string, input interface{}) (string, error) {
 	reqBody := OpenAIRequest{
 		//Model: "o3-mini",
 		//Model: "o1-mini",
-		Model: "gpt-4o-mini",
+		//Model: "gpt-4o-mini",
+		//Model: "gpt-4.1-mini",
+		Model: "gpt-4.1-nano",
 		//Model:     "gpt-4o",
 		Messages: messages,
 		//MaxTokens: 16384,
