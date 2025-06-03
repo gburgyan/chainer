@@ -12,6 +12,7 @@ import (
 	"github.com/gburgyan/chainer/pkg/har"
 	"github.com/gburgyan/chainer/pkg/postman"
 	"github.com/gburgyan/chainer/pkg/util"
+	"gopkg.in/yaml.v3"
 )
 
 // Config holds the application configuration.
@@ -371,29 +372,117 @@ func (a *App) loadPredefinedVars(filePath string) ([]util.PredefinedVariable, er
 	return vars, nil
 }
 
+// YAMLConfig represents the structure of the YAML configuration file
+type YAMLConfig struct {
+	HarFile  string `yaml:"har_file"`
+	VarsFile string `yaml:"vars_file"`
+	Output   string `yaml:"output"`
+	AI       struct {
+		APIKey      string  `yaml:"api_key"`
+		Model       string  `yaml:"model"`
+		MaxTokens   int     `yaml:"max_tokens"`
+		Temperature float64 `yaml:"temperature"`
+		Verbose     bool    `yaml:"verbose"`
+	} `yaml:"ai"`
+}
+
 // ParseFlags parses command-line flags and returns a Config.
+// Now supports both command-line flags and config file.
 func ParseFlags() (*Config, error) {
-	harFilePath := flag.String("file", "", "Path to the HAR file")
-	varsFilePath := flag.String("vars", "", "Path to the JSON file with pre-defined variables")
-	outputPath := flag.String("output", "collection.json", "Output path for the generated Postman collection")
-	verbose := flag.Bool("verbose", false, "Enable verbose logging of AI API calls")
+	configFile := flag.String("config", "", "Path to the YAML configuration file")
+	harFilePath := flag.String("file", "", "Path to the HAR file (overrides config file)")
+	varsFilePath := flag.String("vars", "", "Path to the JSON file with pre-defined variables (overrides config file)")
+	outputPath := flag.String("output", "", "Output path for the generated Postman collection (overrides config file)")
+	verbose := flag.Bool("verbose", false, "Enable verbose logging of AI API calls (overrides config file)")
 
 	flag.Parse()
 
-	if *harFilePath == "" {
-		usage := "Usage: chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json] [-verbose]"
+	var config *Config
+
+	if *configFile != "" {
+		// Load from config file
+		yamlConfig, err := loadYAMLConfig(*configFile)
+		if err != nil {
+			return nil, fmt.Errorf("error loading config file: %w", err)
+		}
+
+		// Create AI config from YAML
+		aiConfig := ai.DefaultConfig()
+		if yamlConfig.AI.APIKey != "" {
+			aiConfig.APIKey = yamlConfig.AI.APIKey
+		}
+		if yamlConfig.AI.Model != "" {
+			aiConfig.Model = yamlConfig.AI.Model
+		}
+		if yamlConfig.AI.MaxTokens > 0 {
+			aiConfig.MaxTokens = yamlConfig.AI.MaxTokens
+		}
+		// Note: Temperature is not currently supported in ai.Config
+		// This would need to be added to the ai package if needed
+		aiConfig.Verbose = yamlConfig.AI.Verbose
+
+		config = &Config{
+			HarFilePath:  yamlConfig.HarFile,
+			VarsFilePath: yamlConfig.VarsFile,
+			OutputPath:   yamlConfig.Output,
+			AIConfig:     aiConfig,
+		}
+	} else {
+		// Create default config
+		config = &Config{
+			OutputPath: "collection.json",
+			AIConfig:   ai.DefaultConfig(),
+		}
+	}
+
+	// Override with command-line flags if provided
+	if *harFilePath != "" {
+		config.HarFilePath = *harFilePath
+	}
+	if *varsFilePath != "" {
+		config.VarsFilePath = *varsFilePath
+	}
+	if *outputPath != "" {
+		config.OutputPath = *outputPath
+	}
+	if *verbose {
+		config.AIConfig.Verbose = true
+	}
+
+	// Validate required fields
+	if config.HarFilePath == "" {
+		usage := `Usage:
+  chainer -config=<path_to_config_file>
+  chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json] [-verbose]
+
+Example config file:
+  har_file: "path/to/your.har"
+  output: "collection.json"
+  ai:
+    api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY env var`
 		fmt.Println(usage)
 		return nil, errors.New("missing HAR file path")
 	}
 
-	// Create default OpenAI config
-	aiConfig := ai.DefaultConfig()
-	aiConfig.Verbose = *verbose
+	return config, nil
+}
 
-	return &Config{
-		HarFilePath:  *harFilePath,
-		VarsFilePath: *varsFilePath,
-		OutputPath:   *outputPath,
-		AIConfig:     aiConfig,
-	}, nil
+// loadYAMLConfig loads configuration from a YAML file
+func loadYAMLConfig(filePath string) (*YAMLConfig, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading config file: %w", err)
+	}
+
+	var config YAMLConfig
+	if err := yaml.Unmarshal(data, &config); err != nil {
+		return nil, fmt.Errorf("error parsing config file: %w", err)
+	}
+
+	// Set defaults if not specified
+	if config.Output == "" {
+		config.Output = "collection.json"
+	}
+
+	return &config, nil
 }
