@@ -1,0 +1,53 @@
+# Chainer Configuration File
+# This file configures the HAR to Postman Collection converter
+
+# Path to the HAR (HTTP Archive) file to process
+# This file contains captured HTTP traffic that will be analyzed
+# to create a Postman collection with automatic variable extraction
+har_file: ""
+
+# Path to the JSON file containing pre-defined variables (optional)
+# Format: [{"name": "var_name", "value": "var_value"}, ...]
+# These variables will be incorporated into the collection alongside
+# automatically detected chained values
+vars_file: ""
+
+# Output path for the generated Postman collection
+# Default: collection.json
+output: "collection.json"
+
+# OpenAI API configuration
+ai:
+  # OpenAI API key (required)
+  # Can also be set via OPENAI_API_KEY environment variable
+  # Environment variable takes precedence over this setting
+  api_key: ""
+  
+  # Model to use for AI operations
+  # Default: gpt-4
+  # Options: gpt-4, gpt-4-turbo-preview, gpt-3.5-turbo
+  model: "gpt-4"
+  
+  # Maximum tokens for AI responses
+  # Default: 4096
+  max_tokens: 4096
+  
+  # Temperature for AI responses (0.0 to 1.0)
+  # Lower values make output more deterministic
+  # Note: This field is reserved for future use
+  # temperature: 0.7
+  
+  # Enable verbose logging of AI API calls
+  # Useful for debugging AI interactions
+  # Default: false
+  verbose: false
+
+# Example usage:
+# 1. Copy this file and name it according to your project
+# 2. Fill in the required fields (har_file and ai.api_key)
+# 3. Run: chainer -config=your-config.yaml
+#
+# Minimal example:
+# har_file: "path/to/your.har"
+# ai:
+#   api_key: "sk-your-openai-api-key"
