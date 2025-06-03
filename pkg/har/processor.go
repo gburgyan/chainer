@@ -52,73 +52,113 @@ func (p *Processor) Process(harFilePath string) ([]*util.CallDetails, error) {
 // It extracts and processes request and response details, including URLs, headers, and bodies.
 // It collects ValueReference instances for both requests and responses and assembles a list of CallDetails.
 func (p *Processor) ProcessHAR(har HAR) []*util.CallDetails {
-	// Slice to keep track of all CallDetails
 	var callDetailsList []*util.CallDetails
 
-	// Process each entry
 	for i := range har.Log.Entries {
 		entry := &har.Log.Entries[i]
-		log.Printf("Processing entry: %s", entry.Request.URL)
-
-		callDetails := &util.CallDetails{
-			Entry: entry,
-		}
-
-		// Process Request Body
-		reqBody := ""
-		if entry.Request.PostData != nil && entry.Request.PostData.Text != "" {
-			reqBody = entry.Request.PostData.Text
-		}
-		requestMimeType := ""
-		if entry.Request.PostData != nil {
-			requestMimeType = entry.Request.PostData.MimeType
-		}
-		reqDetails, err := p.processBody(reqBody, requestMimeType)
-		if err != nil {
-			log.Printf("Error processing request body: %v", err)
-			// Continue processing even if there's an error in the request body
-		}
-		reqHeaderDetails := p.processHeaders(entry.Request.Headers)
-		reqDetails = append(reqDetails, reqHeaderDetails...)
-		for j := range reqDetails {
-			reqDetails[j].Source = callDetails
-			reqDetails[j].SourceType = util.SourceTypeRequest
-		}
-		callDetails.RequestDetails = reqDetails
-
-		// Process Response Body
-		respBody := entry.Response.Content.Text
-		respDetails, err := p.processBody(respBody, entry.Response.Content.MimeType)
-		if err != nil {
-			log.Printf("Error processing response body: %v", err)
-			// Continue processing even if there's an error in the response body
-		}
-		respHeaderDetails := p.processHeaders(entry.Response.Headers)
-		respDetails = append(respDetails, respHeaderDetails...)
-		for j := range respDetails {
-			respDetails[j].Source = callDetails
-			respDetails[j].SourceType = util.SourceTypeResponse
-		}
-		callDetails.ResponseDetails = respDetails
-
-		// Extract URL strings
-		urlValues, err := p.extractURLStrings(entry.Request.URL)
-		if err != nil {
-			log.Printf("Error extracting URL strings: %v", err)
-			// Continue processing even if there's an error in URL parsing
-		}
-
-		for j := range urlValues {
-			urlValues[j].Source = callDetails
-			urlValues[j].SourceType = util.SourceTypeRequest
-			urlValues[j].SourceLocation = util.SourceLocationUrl
-		}
-		callDetails.RequestDetails = append(callDetails.RequestDetails, urlValues...)
-
-		// Append the CallDetails to the list
+		callDetails := p.processEntry(entry)
 		callDetailsList = append(callDetailsList, callDetails)
 	}
+
 	return callDetailsList
+}
+
+// processEntry processes a single HAR entry and returns the extracted call details.
+func (p *Processor) processEntry(entry *Entry) *util.CallDetails {
+	log.Printf("Processing entry: %s", entry.Request.URL)
+
+	callDetails := &util.CallDetails{
+		Entry: entry,
+	}
+
+	// Process request and response
+	callDetails.RequestDetails = p.processRequest(entry, callDetails)
+	callDetails.ResponseDetails = p.processResponse(entry, callDetails)
+
+	return callDetails
+}
+
+// processRequest extracts and processes all request-related data including body, headers, and URL.
+func (p *Processor) processRequest(entry *Entry, callDetails *util.CallDetails) []*util.ValueReference {
+	var allDetails []*util.ValueReference
+
+	// Process request body
+	bodyDetails := p.extractRequestBody(entry.Request)
+	allDetails = append(allDetails, bodyDetails...)
+
+	// Process request headers
+	headerDetails := p.processHeaders(entry.Request.Headers)
+	allDetails = append(allDetails, headerDetails...)
+
+	// Extract URL components
+	urlDetails := p.extractURLDetails(entry.Request.URL)
+	allDetails = append(allDetails, urlDetails...)
+
+	// Set source metadata for all request details
+	p.setValueReferenceMetadata(allDetails, callDetails, util.SourceTypeRequest)
+
+	return allDetails
+}
+
+// extractRequestBody extracts the body content and MIME type from a request.
+func (p *Processor) extractRequestBody(request Request) []*util.ValueReference {
+	if request.PostData == nil {
+		return nil
+	}
+
+	bodyDetails, err := p.processBody(request.PostData.Text, request.PostData.MimeType)
+	if err != nil {
+		log.Printf("Error processing request body: %v", err)
+		return nil
+	}
+
+	return bodyDetails
+}
+
+// extractURLDetails extracts and processes URL components, setting proper source locations.
+func (p *Processor) extractURLDetails(url string) []*util.ValueReference {
+	urlValues, err := p.extractURLStrings(url)
+	if err != nil {
+		log.Printf("Error extracting URL strings: %v", err)
+		return nil
+	}
+
+	// Set URL-specific source location
+	for i := range urlValues {
+		urlValues[i].SourceLocation = util.SourceLocationUrl
+	}
+
+	return urlValues
+}
+
+// processResponse extracts and processes all response-related data including body and headers.
+func (p *Processor) processResponse(entry *Entry, callDetails *util.CallDetails) []*util.ValueReference {
+	var allDetails []*util.ValueReference
+
+	// Process response body
+	respBody := entry.Response.Content.Text
+	bodyDetails, err := p.processBody(respBody, entry.Response.Content.MimeType)
+	if err != nil {
+		log.Printf("Error processing response body: %v", err)
+	}
+	allDetails = append(allDetails, bodyDetails...)
+
+	// Process response headers
+	headerDetails := p.processHeaders(entry.Response.Headers)
+	allDetails = append(allDetails, headerDetails...)
+
+	// Set source metadata for all response details
+	p.setValueReferenceMetadata(allDetails, callDetails, util.SourceTypeResponse)
+
+	return allDetails
+}
+
+// setValueReferenceMetadata sets the source and source type for a slice of ValueReference.
+func (p *Processor) setValueReferenceMetadata(refs []*util.ValueReference, source *util.CallDetails, sourceType util.SourceType) {
+	for i := range refs {
+		refs[i].Source = source
+		refs[i].SourceType = sourceType
+	}
 }
 
 // FlattenJSON takes a JSON string and flattens it into a slice of ValueReference pointers.
