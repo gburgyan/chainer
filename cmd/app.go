@@ -35,6 +35,15 @@ func NewApp(config *Config) *App {
 }
 
 // Run executes the main application flow.
+// The process follows these steps:
+//  1. Initialize all required components (HAR processor, chain finder, AI clients, etc.)
+//  2. Parse the HAR file to extract HTTP calls and their request/response data
+//  3. Analyze the extracted data to find "chained values" - values that appear in one response
+//     and are then used in subsequent requests (e.g., authentication tokens, IDs, etc.)
+//  4. Optionally incorporate pre-defined variables from a user-provided JSON file
+//  5. Use AI to generate meaningful names for both the variables and API calls
+//  6. Build a Postman collection with automatic variable extraction and substitution
+//  7. Write the collection to the specified output file
 func (a *App) Run() error {
 	// Initialize components
 	components, err := a.initializeComponents()
@@ -81,6 +90,13 @@ type AppComponents struct {
 }
 
 // initializeComponents initializes all the application components.
+// This creates instances of:
+// - HAR Processor: Parses HAR files and extracts HTTP request/response data
+// - Chain Finder: Identifies values that are used across multiple requests
+// - OpenAI Client: Direct API client for AI-powered naming
+// - Templated Client: Template-based AI client for more structured prompts (optional)
+// - Variable Namer: Uses AI to generate meaningful names for extracted variables
+// - Postman Builder: Constructs the final Postman collection with all the data
 func (a *App) initializeComponents() (*AppComponents, error) {
 	// Create basic components
 	harProcessor := har.NewProcessor()
@@ -120,6 +136,14 @@ func (a *App) initializeComponents() (*AppComponents, error) {
 }
 
 // processHAR processes the HAR file and identifies chained values.
+// This function:
+//  1. Reads and parses the HAR file to extract all HTTP calls (request/response pairs)
+//  2. Analyzes the calls to find "chained values" - values that appear in one response
+//     and are then used in subsequent requests. Common examples include:
+//     - Authentication tokens (OAuth, JWT, session IDs)
+//     - Resource IDs (user IDs, order IDs, etc.)
+//     - Timestamps or nonces used across requests
+//  3. Returns both the raw call details and the identified chained values
 func (a *App) processHAR(components *AppComponents) ([]*util.CallDetails, []*util.ChainedValueContext, error) {
 	log.Println("Processing HAR file:", a.Config.HarFilePath)
 	callDetailsList, err := components.HarProcessor.Process(a.Config.HarFilePath)
@@ -134,6 +158,12 @@ func (a *App) processHAR(components *AppComponents) ([]*util.CallDetails, []*uti
 }
 
 // processPredefinedVariables processes predefined variables from a file.
+// This allows users to specify variables that should be extracted and used in the collection,
+// even if they wouldn't be automatically detected as chained values. This is useful for:
+// - Environment-specific values (API keys, base URLs, etc.)
+// - Values that appear only once but should be parameterized
+// - Values that the automatic detection might miss due to complex patterns
+// The variables file should be a JSON array of objects with "name" and "value" properties.
 func (a *App) processPredefinedVariables(components *AppComponents, callDetailsList []*util.CallDetails, chainedValues []*util.ChainedValueContext) ([]*util.ChainedValueContext, error) {
 	log.Println("Processing predefined variables from:", a.Config.VarsFilePath)
 	predefinedVars, err := a.loadPredefinedVars(a.Config.VarsFilePath)
@@ -146,6 +176,13 @@ func (a *App) processPredefinedVariables(components *AppComponents, callDetailsL
 }
 
 // processChainedValues processes chained values, assigns names, and updates call details.
+// This function performs several important steps:
+//  1. Logs the detected chained values for debugging purposes
+//  2. Re-associates the chained values with their respective HTTP calls
+//  3. Uses AI to generate meaningful variable names based on context
+//     (e.g., "auth_token" instead of "var1", "user_id" instead of "var2")
+//  4. Uses AI to generate descriptive names for each API call in the sequence
+//     (e.g., "Login User", "Get User Profile", "Update Account Settings")
 func (a *App) processChainedValues(components *AppComponents, callDetailsList []*util.CallDetails, chainedValues []*util.ChainedValueContext) error {
 	// Log initial chained values for debugging
 	components.ChainFinder.LogChainedValues(chainedValues)
@@ -169,6 +206,12 @@ func (a *App) processChainedValues(components *AppComponents, callDetailsList []
 }
 
 // buildPostmanCollection builds and writes the Postman collection.
+// This final step creates a complete Postman collection that includes:
+// - All HTTP requests from the HAR file with proper formatting
+// - Variable substitutions in URLs, headers, and request bodies (e.g., {{auth_token}})
+// - Test scripts that automatically extract values from responses and save them as variables
+// - Pre-request scripts if needed for dynamic value generation
+// The resulting collection can be imported into Postman and run without manual modification.
 func (a *App) buildPostmanCollection(components *AppComponents, callDetailsList []*util.CallDetails, chainedValues []*util.ChainedValueContext) error {
 	log.Println("Building Postman collection...")
 	collection := components.PostmanBuilder.BuildCollection(callDetailsList, chainedValues)
@@ -193,6 +236,13 @@ type CallNameResponse struct {
 }
 
 // assignCallNames uses OpenAI to generate meaningful names for API calls.
+// This function sends all the API URLs and their sequence numbers to OpenAI,
+// which returns human-readable names for each endpoint. The AI considers:
+// - The URL structure and path components
+// - The sequence of calls to understand the workflow
+// - Common API patterns and naming conventions
+// The function includes retry logic for resilience against API failures,
+// and supports both templated prompts (if available) and legacy direct prompts.
 func (a *App) assignCallNames(components *AppComponents, callDetailsList []*util.CallDetails) error {
 	var requests []CallNameRequest
 	for i, callDetails := range callDetailsList {
@@ -292,6 +342,21 @@ array and the ordering MUST be preserved. Return only the raw JSON array without
 `
 
 // loadPredefinedVars loads predefined variables from a JSON file.
+// The file should contain a JSON array of objects with the following structure:
+// [
+//
+//	{
+//	  "name": "api_key",
+//	  "value": "sk-1234567890abcdef"
+//	},
+//	{
+//	  "name": "base_url",
+//	  "value": "https://api.example.com"
+//	}
+//
+// ]
+// These variables will be incorporated into the Postman collection alongside
+// the automatically detected chained values.
 func (a *App) loadPredefinedVars(filePath string) ([]util.PredefinedVariable, error) {
 	data, err := os.ReadFile(filePath)
 	if err != nil {
