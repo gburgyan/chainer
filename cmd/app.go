@@ -7,10 +7,13 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 
 	"github.com/gburgyan/chainer/pkg/ai"
 	"github.com/gburgyan/chainer/pkg/har"
 	"github.com/gburgyan/chainer/pkg/postman"
+	"github.com/gburgyan/chainer/pkg/proxy"
 	"github.com/gburgyan/chainer/pkg/util"
 	"gopkg.in/yaml.v3"
 )
@@ -21,6 +24,9 @@ type Config struct {
 	VarsFilePath string
 	OutputPath   string
 	AIConfig     *ai.Config
+	// Proxy-related fields
+	ProxyPort  int
+	RecordPath string
 }
 
 // App is the main application struct.
@@ -36,6 +42,20 @@ func NewApp(config *Config) *App {
 }
 
 // Run executes the main application flow.
+// The application can run in two modes:
+// 1. HAR Processing Mode: Processes an existing HAR file to create a Postman collection
+// 2. Proxy Mode: Starts a proxy server to capture HTTP traffic and optionally create a collection
+func (a *App) Run() error {
+	// Check if we're in proxy mode
+	if a.Config.ProxyPort > 0 {
+		return a.runProxyMode()
+	}
+
+	// Otherwise, run in HAR processing mode
+	return a.runHARMode()
+}
+
+// runHARMode executes the HAR processing flow.
 // The process follows these steps:
 //  1. Initialize all required components (HAR processor, chain finder, AI clients, etc.)
 //  2. Parse the HAR file to extract HTTP calls and their request/response data
@@ -45,7 +65,7 @@ func NewApp(config *Config) *App {
 //  5. Use AI to generate meaningful names for both the variables and API calls
 //  6. Build a Postman collection with automatic variable extraction and substitution
 //  7. Write the collection to the specified output file
-func (a *App) Run() error {
+func (a *App) runHARMode() error {
 	// Initialize components
 	components, err := a.initializeComponents()
 	if err != nil {
@@ -77,6 +97,49 @@ func (a *App) Run() error {
 	}
 
 	fmt.Println("Postman collection generated successfully at:", a.Config.OutputPath)
+	return nil
+}
+
+// runProxyMode starts the proxy server and optionally records HAR data
+func (a *App) runProxyMode() error {
+	// Create proxy server
+	proxyServer, err := proxy.New(proxy.Options{
+		Port:       a.Config.ProxyPort,
+		RecordPath: a.Config.RecordPath,
+	})
+	if err != nil {
+		return fmt.Errorf("failed to create proxy server: %w", err)
+	}
+
+	// Setup signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	// Start proxy in a goroutine
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- proxyServer.Start()
+	}()
+
+	// Wait for either error or interrupt signal
+	select {
+	case err := <-errChan:
+		return fmt.Errorf("proxy server error: %w", err)
+	case <-sigChan:
+		log.Println("\nShutting down proxy server...")
+		if err := proxyServer.Stop(); err != nil {
+			return fmt.Errorf("error stopping proxy: %w", err)
+		}
+
+		// If we recorded a HAR file and have an output path, process it
+		if a.Config.RecordPath != "" && a.Config.OutputPath != "" {
+			log.Println("Processing recorded HAR file...")
+			// Update config to process the recorded HAR
+			a.Config.HarFilePath = a.Config.RecordPath
+			return a.runHARMode()
+		}
+	}
+
 	return nil
 }
 
@@ -384,6 +447,10 @@ type YAMLConfig struct {
 		Temperature float64 `yaml:"temperature"`
 		Verbose     bool    `yaml:"verbose"`
 	} `yaml:"ai"`
+	Proxy struct {
+		Port   int    `yaml:"port"`
+		Record string `yaml:"record"`
+	} `yaml:"proxy"`
 }
 
 // ParseFlags parses command-line flags and returns a Config.
@@ -394,6 +461,9 @@ func ParseFlags() (*Config, error) {
 	varsFilePath := flag.String("vars", "", "Path to the JSON file with pre-defined variables (overrides config file)")
 	outputPath := flag.String("output", "", "Output path for the generated Postman collection (overrides config file)")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging of AI API calls (overrides config file)")
+	// Proxy-related flags
+	proxyPort := flag.Int("proxy", 0, "Start proxy server on specified port (e.g., 8080)")
+	recordPath := flag.String("record", "", "Record proxy traffic to HAR file at specified path")
 
 	flag.Parse()
 
@@ -426,6 +496,8 @@ func ParseFlags() (*Config, error) {
 			VarsFilePath: yamlConfig.VarsFile,
 			OutputPath:   yamlConfig.Output,
 			AIConfig:     aiConfig,
+			ProxyPort:    yamlConfig.Proxy.Port,
+			RecordPath:   yamlConfig.Proxy.Record,
 		}
 	} else {
 		// Create default config
@@ -448,20 +520,40 @@ func ParseFlags() (*Config, error) {
 	if *verbose {
 		config.AIConfig.Verbose = true
 	}
+	if *proxyPort > 0 {
+		config.ProxyPort = *proxyPort
+	}
+	if *recordPath != "" {
+		config.RecordPath = *recordPath
+	}
 
-	// Validate required fields
-	if config.HarFilePath == "" {
-		usage := `Usage:
+	// Validate based on mode
+	if config.ProxyPort > 0 {
+		// Proxy mode - no additional validation needed
+	} else {
+		// HAR processing mode validation
+		if config.HarFilePath == "" {
+			usage := `Usage:
+  # HAR Processing Mode:
   chainer -config=<path_to_config_file>
   chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json] [-verbose]
+
+  # Proxy Mode (acts as a general HTTP/HTTPS forward proxy):
+  chainer -proxy=<port> [-record=<har_file>] [-output=collection.json]
 
 Example config file:
   har_file: "path/to/your.har"
   output: "collection.json"
   ai:
-    api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY env var`
-		fmt.Println(usage)
-		return nil, errors.New("missing HAR file path")
+    api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY env var
+  
+  # Or for proxy mode:
+  proxy:
+    port: 8080
+    record: "capture.har"`
+			fmt.Println(usage)
+			return nil, errors.New("missing HAR file path or proxy configuration")
+		}
 	}
 
 	return config, nil
