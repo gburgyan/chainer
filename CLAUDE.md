@@ -9,10 +9,11 @@ This repository contains a Go utility called "chainer" that converts HTTP Archiv
 ## Key Features
 
 - Analyzes HAR files to identify chained values (values that appear in a response and are then used in subsequent requests)
-- Uses OpenAI to generate meaningful names for API endpoints and variables
+- Uses AI (OpenAI or Anthropic) to generate meaningful names for API endpoints and variables
 - Creates Postman test scripts to extract response values into variables
 - Supports pre-defined variable substitution
 - Handles complex JSON paths for reliable value extraction
+- Optional AI-powered path refinement for more stable value extraction across varying API responses
 - Built-in HTTP/HTTPS proxy server for capturing API traffic
 - Records proxy traffic to HAR files for later processing
 - Supports automatic Postman collection generation from proxy recordings
@@ -29,6 +30,7 @@ go build .
 go run . -file=<path_to_har_file>
 go run . -file=<path_to_har_file> -vars=<path_to_vars_file>
 go run . -file=<path_to_har_file> -output=my_collection.json
+go run . -file=<path_to_har_file> -refine-paths  # Enable complex path refinement
 
 # Proxy Mode (general forward proxy)
 go run . -proxy=8080 -record=capture.har
@@ -40,10 +42,14 @@ go run . -config=config.yaml
 
 ### Required Environment Variables
 
-The application requires an OpenAI API key to be set as an environment variable:
+The application requires an AI API key to be set as an environment variable:
 
 ```bash
+# For OpenAI
 export OPENAI_API_KEY=your_api_key_here
+
+# For Anthropic
+export ANTHROPIC_API_KEY=your_api_key_here
 ```
 
 ## Architecture Overview
@@ -56,7 +62,7 @@ The application is structured around the following key components:
 
 3. **Value Chaining Analysis**: `pkg/util/` identifies values that appear in responses and are later used in requests, marking them as "chained values" suitable for variable substitution.
 
-4. **OpenAI Integration**: `pkg/ai/` handles intelligent naming of API endpoints and variables using OpenAI's API. It includes retry logic for API calls and supports templated prompts.
+4. **AI Integration**: `pkg/ai/` handles intelligent naming of API endpoints and variables using AI (OpenAI or Anthropic). It includes retry logic for API calls, supports templated prompts, and can optionally refine complex JSON paths for better stability.
 
 5. **Postman Collection Generation**: `pkg/postman/` generates the Postman collection structure with appropriate variable substitutions and test scripts for extracting values.
 
@@ -74,4 +80,5 @@ The application is structured around the following key components:
 
 - The code uses a structured approach with clear separation of concerns between HAR parsing, value extraction, and Postman collection generation.
 - Error handling is implemented throughout with detailed error messages and retry logic for API calls.
-- OpenAI API calls are designed to provide context and examples for generating meaningful names.
+- AI API calls are designed to provide context and examples for generating meaningful names.
+- Template-based prompts are supported for better maintainability and consistency.

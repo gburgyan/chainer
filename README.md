@@ -6,16 +6,37 @@ A Go utility that converts HTTP Archive (HAR) files into Postman collections, au
 
 - **HAR Processing**: Analyzes HAR files to identify chained values (values that appear in a response and are then used in subsequent requests)
 - **Proxy Mode**: Built-in HTTP/HTTPS proxy server to capture and record API traffic to HAR files
-- **Intelligent Naming**: Uses AI to generate meaningful names for API endpoints and variables
+- **Intelligent Naming**: Uses AI (OpenAI or Anthropic) to generate meaningful names for API endpoints and variables
 - **Variable Extraction**: Generates Postman test scripts to extract response values into variables
 - **Pre-defined Variables**: Supports pre-defined variable substitution
 - **Complex JSON Paths**: Handles complex JSON paths for reliable value extraction
+- **Path Refinement**: Optional AI-powered refinement of JSON paths for better stability across varying API responses
 
 ## Installation
 
 ```bash
 go get github.com/gburgyan/chainer
 ```
+
+## AI Provider Configuration
+
+Chainer supports multiple AI providers for intelligent naming:
+
+### OpenAI
+- Set environment variable: `export OPENAI_API_KEY=sk-...`
+- Or specify in config: `provider: "openai"`
+- Models: `gpt-4`, `gpt-3.5-turbo`, etc.
+
+### Anthropic
+- Set environment variable: `export ANTHROPIC_API_KEY=sk-ant-...`
+- Or specify in config: `provider: "anthropic"`
+- Models: `claude-3-opus-20240229`, `claude-3-sonnet-20240229`, `claude-3-haiku-20240307`
+
+### Auto-detection
+If no provider is specified, Chainer will:
+1. Check model name (e.g., "gpt-4" → OpenAI, "claude-3" → Anthropic)
+2. Check available API keys in environment
+3. Default to OpenAI for backward compatibility
 
 ## Usage
 
@@ -24,7 +45,11 @@ go get github.com/gburgyan/chainer
 Process an existing HAR file to create a Postman collection:
 
 ```bash
+# Basic processing
 chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json]
+
+# With complex path refinement for better stability
+chainer -file=<path_to_har_file> -refine-paths [-output=collection.json]
 ```
 
 ### Proxy Mode
@@ -64,6 +89,9 @@ chainer -config=config.yaml
 #### General Options
 - `-config`: Path to YAML configuration file
 - `-verbose`: Enable verbose logging
+- `-provider`: AI provider to use: 'openai' or 'anthropic' (auto-detects if not specified)
+- `-model`: Specific AI model to use (e.g., 'gpt-4', 'claude-3-haiku-20240307')
+- `-refine-paths`: Enable complex JSON path refinement for more stable value extraction
 
 ### Configuration File Format
 
@@ -75,10 +103,12 @@ output: "collection.json"
 
 # AI configuration
 ai:
-  api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY env var
-  model: "gpt-4"              # optional, defaults to gpt-4
+  provider: "anthropic"       # or "openai" (auto-detects if not specified)
+  api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY/ANTHROPIC_API_KEY env var
+  model: "claude-3-haiku-20240307"  # or "gpt-4", etc.
   max_tokens: 4096            # optional
   verbose: false              # optional
+  refine_complex_paths: false # optional - enable complex path refinement
 
 # Proxy configuration
 proxy:
@@ -135,21 +165,35 @@ The project is organized into several packages:
 - `pkg/har` - HAR file processing and parsing
 - `pkg/util` - Core domain types and chain finding logic
 - `pkg/postman` - Postman collection generation
-- `pkg/ai` - OpenAI integration for naming
+- `pkg/ai` - AI integration for naming (supports OpenAI and Anthropic)
 - `pkg/proxy` - HTTP/HTTPS proxy server and HAR recording
 
 ## How It Works
 
 1. Parses the HAR file to extract HTTP requests and responses
 2. Identifies values that appear in responses and are later used in requests
-3. Uses OpenAI to generate meaningful names for requests and variables
-4. Creates Postman test scripts to automatically extract values from responses
-5. Replaces hardcoded values in requests with Postman variables
-6. Generates a complete Postman collection with the converted requests
+3. Uses AI (OpenAI or Anthropic) to generate meaningful names for requests and variables
+4. (Optional) Refines complex JSON paths to make them more stable across varying API responses
+5. Creates Postman test scripts to automatically extract values from responses
+6. Replaces hardcoded values in requests with Postman variables
+7. Generates a complete Postman collection with the converted requests
+
+### Complex Path Refinement
+
+When enabled with `-refine-paths`, the tool uses AI to analyze JSON response structures and create more stable extraction paths. This is particularly useful for:
+
+- APIs that return arrays where order might change
+- Complex nested structures where simple paths might break
+- Cases where JSONPath queries would be more reliable than simple dot notation
+
+Example: Instead of `responseJson.Documents[1].DocumentID`, the tool might generate:
+`jsonpath.query(responseJson, "Documents[?(@.DocumentType == 'TicketNumber')].DocumentID")`
 
 ## Dependencies
 
-- OpenAI API for intelligent naming (requires an `OPENAI_API_KEY` environment variable)
+- AI API for intelligent naming - supports:
+  - OpenAI (requires `OPENAI_API_KEY` environment variable)
+  - Anthropic (requires `ANTHROPIC_API_KEY` environment variable)
 
 ## Development
 

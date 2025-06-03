@@ -145,12 +145,13 @@ func (a *App) runProxyMode() error {
 
 // AppComponents holds the main application components
 type AppComponents struct {
-	HarProcessor    *har.Processor
-	ChainFinder     *util.ChainFinder
-	OpenAIClient    *ai.OpenAIClient
-	TemplatedClient *ai.TemplatedClient
-	VariableNamer   *ai.VariableNamer
-	PostmanBuilder  *postman.Builder
+	HarProcessor         *har.Processor
+	ChainFinder          *util.ChainFinder
+	OpenAIClient         *ai.OpenAIClient
+	TemplatedClient      *ai.TemplatedClient
+	VariableNamer        *ai.VariableNamer
+	ComplexPathProcessor *ai.ComplexPathProcessor
+	PostmanBuilder       *postman.Builder
 }
 
 // initializeComponents initializes all the application components.
@@ -167,35 +168,39 @@ func (a *App) initializeComponents() (*AppComponents, error) {
 	chainFinder := util.NewChainFinder()
 	postmanBuilder := postman.NewBuilder()
 
-	// Setup OpenAI client
-	openAIClient, err := ai.NewOpenAIClient(a.Config.AIConfig)
+	// Setup AI client using the factory
+	aiClient, err := ai.NewClient(a.Config.AIConfig)
 	if err != nil {
-		return nil, fmt.Errorf("error creating OpenAI client: %w", err)
+		return nil, fmt.Errorf("error creating AI client: %w", err)
 	}
 
 	// Try to create a templated client, but fall back to regular client if there's an issue
 	var templatedClient *ai.TemplatedClient
-	templatedClient, err = ai.NewTemplatedClient(a.Config.AIConfig)
+	templatedClient, err = ai.NewTemplatedClientWithProvider(a.Config.AIConfig)
 	if err != nil {
 		log.Printf("Warning: Unable to initialize templated client: %v", err)
-		log.Println("Falling back to standard OpenAI client")
+		log.Println("Falling back to standard AI client")
 		templatedClient = nil
 	}
 
 	// Create variable namer with the best available client
-	var aiClient ai.OpenAIClientInterface = openAIClient
+	var clientForNamer ai.OpenAIClientInterface = aiClient
 	if templatedClient != nil {
-		aiClient = templatedClient
+		clientForNamer = templatedClient
 	}
-	variableNamer := ai.NewVariableNamer(aiClient)
+	variableNamer := ai.NewVariableNamer(clientForNamer)
+
+	// Create complex path processor
+	complexPathProcessor := ai.NewComplexPathProcessor(clientForNamer)
 
 	return &AppComponents{
-		HarProcessor:    harProcessor,
-		ChainFinder:     chainFinder,
-		OpenAIClient:    openAIClient,
-		TemplatedClient: templatedClient,
-		VariableNamer:   variableNamer,
-		PostmanBuilder:  postmanBuilder,
+		HarProcessor:         harProcessor,
+		ChainFinder:          chainFinder,
+		OpenAIClient:         nil, // Deprecated - kept for backward compatibility
+		TemplatedClient:      templatedClient,
+		VariableNamer:        variableNamer,
+		ComplexPathProcessor: complexPathProcessor,
+		PostmanBuilder:       postmanBuilder,
 	}, nil
 }
 
@@ -254,7 +259,13 @@ func (a *App) processChainedValues(components *AppComponents, callDetailsList []
 	// Repopulate call details with chained values
 	components.ChainFinder.RepopulateCallDetails(chainedValues)
 
-	// Assign variable names using OpenAI
+	// Update complex paths to make them more stable (if enabled)
+	if a.Config.AIConfig.RefineComplexPaths {
+		log.Println("Refining complex JSON paths...")
+		components.ComplexPathProcessor.UpdateComplexPaths(chainedValues)
+	}
+
+	// Assign variable names using AI
 	log.Println("Assigning variable names...")
 	if err := components.VariableNamer.AssignVariableNames(chainedValues); err != nil {
 		return fmt.Errorf("error assigning variable names: %w", err)
@@ -441,11 +452,13 @@ type YAMLConfig struct {
 	VarsFile string `yaml:"vars_file"`
 	Output   string `yaml:"output"`
 	AI       struct {
-		APIKey      string  `yaml:"api_key"`
-		Model       string  `yaml:"model"`
-		MaxTokens   int     `yaml:"max_tokens"`
-		Temperature float64 `yaml:"temperature"`
-		Verbose     bool    `yaml:"verbose"`
+		Provider           string  `yaml:"provider"`
+		APIKey             string  `yaml:"api_key"`
+		Model              string  `yaml:"model"`
+		MaxTokens          int     `yaml:"max_tokens"`
+		Temperature        float64 `yaml:"temperature"`
+		Verbose            bool    `yaml:"verbose"`
+		RefineComplexPaths bool    `yaml:"refine_complex_paths"`
 	} `yaml:"ai"`
 	Proxy struct {
 		Port   int    `yaml:"port"`
@@ -461,6 +474,10 @@ func ParseFlags() (*Config, error) {
 	varsFilePath := flag.String("vars", "", "Path to the JSON file with pre-defined variables (overrides config file)")
 	outputPath := flag.String("output", "", "Output path for the generated Postman collection (overrides config file)")
 	verbose := flag.Bool("verbose", false, "Enable verbose logging of AI API calls (overrides config file)")
+	// AI-related flags
+	provider := flag.String("provider", "", "AI provider: 'openai' or 'anthropic' (auto-detects if not specified)")
+	model := flag.String("model", "", "AI model to use (e.g., 'gpt-4', 'claude-3-haiku-20240307')")
+	refineComplexPaths := flag.Bool("refine-paths", false, "Enable complex JSON path refinement for more stable extraction")
 	// Proxy-related flags
 	proxyPort := flag.Int("proxy", 0, "Start proxy server on specified port (e.g., 8080)")
 	recordPath := flag.String("record", "", "Record proxy traffic to HAR file at specified path")
@@ -478,6 +495,9 @@ func ParseFlags() (*Config, error) {
 
 		// Create AI config from YAML
 		aiConfig := ai.DefaultConfig()
+		if yamlConfig.AI.Provider != "" {
+			aiConfig.Provider = yamlConfig.AI.Provider
+		}
 		if yamlConfig.AI.APIKey != "" {
 			aiConfig.APIKey = yamlConfig.AI.APIKey
 		}
@@ -490,6 +510,7 @@ func ParseFlags() (*Config, error) {
 		// Note: Temperature is not currently supported in ai.Config
 		// This would need to be added to the ai package if needed
 		aiConfig.Verbose = yamlConfig.AI.Verbose
+		aiConfig.RefineComplexPaths = yamlConfig.AI.RefineComplexPaths
 
 		config = &Config{
 			HarFilePath:  yamlConfig.HarFile,
@@ -520,6 +541,15 @@ func ParseFlags() (*Config, error) {
 	if *verbose {
 		config.AIConfig.Verbose = true
 	}
+	if *provider != "" {
+		config.AIConfig.Provider = *provider
+	}
+	if *model != "" {
+		config.AIConfig.Model = *model
+	}
+	if *refineComplexPaths {
+		config.AIConfig.RefineComplexPaths = true
+	}
 	if *proxyPort > 0 {
 		config.ProxyPort = *proxyPort
 	}
@@ -537,15 +567,23 @@ func ParseFlags() (*Config, error) {
   # HAR Processing Mode:
   chainer -config=<path_to_config_file>
   chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json] [-verbose]
+          [-provider=openai|anthropic] [-model=<model_name>]
 
   # Proxy Mode (acts as a general HTTP/HTTPS forward proxy):
   chainer -proxy=<port> [-record=<har_file>] [-output=collection.json]
+
+  AI Providers:
+    OpenAI: Set OPENAI_API_KEY environment variable
+    Anthropic: Set ANTHROPIC_API_KEY environment variable
+    Auto-detection: If provider not specified, will detect based on available API keys
 
 Example config file:
   har_file: "path/to/your.har"
   output: "collection.json"
   ai:
-    api_key: "sk-your-api-key"  # Or set OPENAI_API_KEY env var
+    provider: "anthropic"  # or "openai"
+    api_key: "sk-your-api-key"  # Or use environment variables
+    model: "claude-3-haiku-20240307"  # or "gpt-4", etc.
   
   # Or for proxy mode:
   proxy:

@@ -10,90 +10,80 @@ import (
 	"time"
 )
 
-// Config holds configuration settings for AI API calls.
-type Config struct {
-	Provider           string // AI provider: "openai" or "anthropic"
-	Model              string
-	MaxTokens          int
-	APIKey             string
-	Timeout            time.Duration
-	MaxRetries         int
-	Verbose            bool // Enable verbose logging of API calls
-	RefineComplexPaths bool // Enable complex path refinement
+// AnthropicMessage represents a single message for the Anthropic API.
+type AnthropicMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
-// DefaultConfig returns a default configuration for OpenAI API calls.
-func DefaultConfig() *Config {
-	return &Config{
-		Model:              "gpt-4.1-nano",
-		MaxTokens:          0, // Let the API decide
-		Timeout:            30 * time.Second,
-		MaxRetries:         3,
-		Verbose:            false,
-		RefineComplexPaths: false, // Disabled by default for backward compatibility
-	}
+// AnthropicRequest is the request body sent to the Anthropic API.
+type AnthropicRequest struct {
+	Model     string             `json:"model"`
+	Messages  []AnthropicMessage `json:"messages"`
+	MaxTokens int                `json:"max_tokens"`
+	System    string             `json:"system,omitempty"`
 }
 
-// HTTPClientInterface defines the interface for HTTP clients.
-type HTTPClientInterface interface {
-	Do(req *http.Request) (*http.Response, error)
+// AnthropicResponse represents the response from the Anthropic API.
+type AnthropicResponse struct {
+	ID      string `json:"id"`
+	Type    string `json:"type"`
+	Role    string `json:"role"`
+	Content []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	} `json:"content"`
+	Model        string `json:"model"`
+	StopReason   string `json:"stop_reason"`
+	StopSequence string `json:"stop_sequence"`
+	Usage        struct {
+		InputTokens  int `json:"input_tokens"`
+		OutputTokens int `json:"output_tokens"`
+	} `json:"usage"`
 }
 
-// OpenAIClient encapsulates the functionality for making calls to the OpenAI API.
-type OpenAIClient struct {
+// AnthropicClient encapsulates the functionality for making calls to the Anthropic API.
+type AnthropicClient struct {
 	Config *Config
 	client HTTPClientInterface
 }
 
-// NewOpenAIClient creates a new client for OpenAI API calls.
-func NewOpenAIClient(config *Config) (*OpenAIClient, error) {
+// NewAnthropicClient creates a new client for Anthropic API calls.
+func NewAnthropicClient(config *Config) (*AnthropicClient, error) {
 	if config == nil {
 		config = DefaultConfig()
 	}
 
+	// Check for API key in config or environment
 	if config.APIKey == "" {
-		config.APIKey = os.Getenv("OPENAI_API_KEY")
+		config.APIKey = os.Getenv("ANTHROPIC_API_KEY")
 		if config.APIKey == "" {
-			return nil, fmt.Errorf("OPENAI_API_KEY environment variable is not set")
+			return nil, fmt.Errorf("ANTHROPIC_API_KEY environment variable is not set")
 		}
+	}
+
+	// Set default model if not specified
+	if config.Model == "" {
+		config.Model = "claude-3-haiku-20240307" // Fast and cost-effective
+	}
+
+	// Set default max tokens if not specified
+	if config.MaxTokens == 0 {
+		config.MaxTokens = 4096
 	}
 
 	client := &http.Client{
 		Timeout: config.Timeout,
 	}
 
-	return &OpenAIClient{
+	return &AnthropicClient{
 		Config: config,
 		client: client,
 	}, nil
 }
 
-// OpenAIMessage represents a single message for the OpenAI API.
-type OpenAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
-}
-
-// OpenAIRequest is the request body sent to the OpenAI API.
-type OpenAIRequest struct {
-	Model     string          `json:"model"`
-	Messages  []OpenAIMessage `json:"messages"`
-	MaxTokens int             `json:"max_tokens,omitempty"`
-}
-
-// OpenAIChoice represents one of the choices in the OpenAI API response.
-type OpenAIChoice struct {
-	Message OpenAIMessage `json:"message"`
-}
-
-// OpenAIResponse represents the response from the OpenAI API.
-type OpenAIResponse struct {
-	Choices []OpenAIChoice `json:"choices"`
-}
-
-// CallBase sends the request to the OpenAI API and returns the raw response string.
-// It serves as the common base for the higher-level helper functions.
-func (c *OpenAIClient) CallBase(prompt string, input interface{}) (string, error) {
+// CallBase sends the request to the Anthropic API and returns the raw response string.
+func (c *AnthropicClient) CallBase(prompt string, input interface{}) (string, error) {
 	// Prepare the request body
 	reqBodyJSON, err := c.prepareRequestBody(prompt, input)
 	if err != nil {
@@ -111,35 +101,28 @@ func (c *OpenAIClient) CallBase(prompt string, input interface{}) (string, error
 	return c.processResponse(resp)
 }
 
-// prepareRequestBody creates the JSON request body for the OpenAI API.
-func (c *OpenAIClient) prepareRequestBody(prompt string, input interface{}) ([]byte, error) {
+// prepareRequestBody creates the JSON request body for the Anthropic API.
+func (c *AnthropicClient) prepareRequestBody(prompt string, input interface{}) ([]byte, error) {
 	// Convert input to JSON
 	jsonData, err := json.Marshal(input)
 	if err != nil {
 		return nil, fmt.Errorf("error marshalling input: %w", err)
 	}
 
-	// Prepare the messages
-	messages := []OpenAIMessage{
+	// Prepare the messages - Anthropic uses a different format than OpenAI
+	messages := []AnthropicMessage{
 		{
 			Role:    "user",
-			Content: "You are an assistant that takes the input request and performs a simple request.",
-		},
-		{
-			Role:    "user",
-			Content: prompt,
-		},
-		{
-			Role:    "user",
-			Content: string(jsonData),
+			Content: fmt.Sprintf("%s\n\nInput:\n%s", prompt, string(jsonData)),
 		},
 	}
 
-	// Create the OpenAI request body
-	reqBody := OpenAIRequest{
+	// Create the Anthropic request body
+	reqBody := AnthropicRequest{
 		Model:     c.Config.Model,
 		Messages:  messages,
 		MaxTokens: c.Config.MaxTokens,
+		System:    "You are an assistant that takes the input request and performs a simple request. Return only raw JSON without any explanations or decorations.",
 	}
 
 	// Marshal the request body to JSON
@@ -150,7 +133,7 @@ func (c *OpenAIClient) prepareRequestBody(prompt string, input interface{}) ([]b
 
 	// Log the request if verbose mode is enabled
 	if c.Config.Verbose {
-		fmt.Println("\n--- OpenAI Request ---")
+		fmt.Println("\n--- Anthropic Request ---")
 		fmt.Printf("Model: %s\n", c.Config.Model)
 		fmt.Printf("Max Tokens: %d\n", c.Config.MaxTokens)
 		fmt.Println("Prompt: ", prompt)
@@ -161,22 +144,23 @@ func (c *OpenAIClient) prepareRequestBody(prompt string, input interface{}) ([]b
 	return reqBodyJSON, nil
 }
 
-// createRequest creates the HTTP request for the OpenAI API.
-func (c *OpenAIClient) createRequest(reqBodyJSON []byte) (*http.Request, error) {
-	req, err := http.NewRequest("POST", "https://api.openai.com/v1/chat/completions", bytes.NewBuffer(reqBodyJSON))
+// createRequest creates the HTTP request for the Anthropic API.
+func (c *AnthropicClient) createRequest(reqBodyJSON []byte) (*http.Request, error) {
+	req, err := http.NewRequest("POST", "https://api.anthropic.com/v1/messages", bytes.NewBuffer(reqBodyJSON))
 	if err != nil {
 		return nil, fmt.Errorf("error creating request: %w", err)
 	}
 
-	// Set headers
+	// Set headers - Anthropic requires different headers than OpenAI
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.Config.APIKey)
+	req.Header.Set("x-api-key", c.Config.APIKey)
+	req.Header.Set("anthropic-version", "2023-06-01")
 
 	return req, nil
 }
 
 // sendRequestWithRetries sends the HTTP request with retries.
-func (c *OpenAIClient) sendRequestWithRetries(reqBodyJSON []byte) (*http.Response, error) {
+func (c *AnthropicClient) sendRequestWithRetries(reqBodyJSON []byte) (*http.Response, error) {
 	// Create the HTTP request
 	req, err := c.createRequest(reqBodyJSON)
 	if err != nil {
@@ -189,7 +173,7 @@ func (c *OpenAIClient) sendRequestWithRetries(reqBodyJSON []byte) (*http.Respons
 
 	for attempt := 0; attempt <= c.Config.MaxRetries; attempt++ {
 		if c.Config.Verbose {
-			fmt.Printf("\nSending request (attempt %d/%d)...\n", attempt+1, c.Config.MaxRetries+1)
+			fmt.Printf("\nSending request to Anthropic (attempt %d/%d)...\n", attempt+1, c.Config.MaxRetries+1)
 		}
 
 		if attempt > 0 {
@@ -214,6 +198,13 @@ func (c *OpenAIClient) sendRequestWithRetries(reqBodyJSON []byte) (*http.Respons
 			if c.Config.Verbose {
 				fmt.Printf("Request failed with status: %s\n", resp.Status)
 			}
+			// Read error body for better debugging
+			if resp.StatusCode >= 400 {
+				errBody, _ := io.ReadAll(resp.Body)
+				if c.Config.Verbose {
+					fmt.Printf("Error response: %s\n", string(errBody))
+				}
+			}
 			resp.Body.Close()
 		} else if err != nil && c.Config.Verbose {
 			fmt.Printf("Request failed with error: %v\n", err)
@@ -229,7 +220,7 @@ func (c *OpenAIClient) sendRequestWithRetries(reqBodyJSON []byte) (*http.Respons
 }
 
 // calculateBackoff calculates the backoff duration for a retry attempt.
-func (c *OpenAIClient) calculateBackoff(attempt int) time.Duration {
+func (c *AnthropicClient) calculateBackoff(attempt int) time.Duration {
 	// Exponential backoff with jitter
 	backoff := time.Duration(1<<uint(attempt-1)) * time.Second
 	jitter := time.Duration(100 * time.Millisecond)
@@ -237,7 +228,7 @@ func (c *OpenAIClient) calculateBackoff(attempt int) time.Duration {
 }
 
 // formatRetryError formats the error for a retry attempt.
-func (c *OpenAIClient) formatRetryError(err error, resp *http.Response) error {
+func (c *AnthropicClient) formatRetryError(err error, resp *http.Response) error {
 	if err != nil {
 		return err
 	}
@@ -247,8 +238,8 @@ func (c *OpenAIClient) formatRetryError(err error, resp *http.Response) error {
 	return fmt.Errorf("unknown error during request")
 }
 
-// processResponse processes the HTTP response from the OpenAI API.
-func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
+// processResponse processes the HTTP response from the Anthropic API.
+func (c *AnthropicClient) processResponse(resp *http.Response) (string, error) {
 	// Read the response body
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -257,14 +248,14 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 
 	// Log the raw response if verbose mode is enabled
 	if c.Config.Verbose {
-		fmt.Println("\n--- OpenAI Response ---")
+		fmt.Println("\n--- Anthropic Response ---")
 		fmt.Printf("Status: %s\n", resp.Status)
 		fmt.Printf("Raw Response: %s\n", string(respBody))
 	}
 
 	// Parse the response into our struct
-	var openAIResponse OpenAIResponse
-	if err := json.Unmarshal(respBody, &openAIResponse); err != nil {
+	var anthropicResponse AnthropicResponse
+	if err := json.Unmarshal(respBody, &anthropicResponse); err != nil {
 		if c.Config.Verbose {
 			fmt.Printf("Error unmarshalling response: %v\n", err)
 			fmt.Println("-------------------------")
@@ -272,35 +263,48 @@ func (c *OpenAIClient) processResponse(resp *http.Response) (string, error) {
 		return "", fmt.Errorf("error unmarshalling response: %w", err)
 	}
 
-	// Check if there are any choices in the response
-	if len(openAIResponse.Choices) == 0 {
+	// Check if there is content in the response
+	if len(anthropicResponse.Content) == 0 {
 		if c.Config.Verbose {
-			fmt.Println("Error: No choices returned from OpenAI")
+			fmt.Println("Error: No content returned from Anthropic")
 			fmt.Println("-------------------------")
 		}
-		return "", fmt.Errorf("no choices returned from OpenAI")
+		return "", fmt.Errorf("no content returned from Anthropic")
 	}
 
-	// Get the content from the first choice
-	content := openAIResponse.Choices[0].Message.Content
+	// Get the text content from the first content item
+	content := ""
+	for _, c := range anthropicResponse.Content {
+		if c.Type == "text" {
+			content = c.Text
+			break
+		}
+	}
+
+	if content == "" {
+		return "", fmt.Errorf("no text content found in Anthropic response")
+	}
 
 	// Log the content if verbose mode is enabled
 	if c.Config.Verbose {
 		fmt.Println("Content: ", content)
+		fmt.Printf("Input tokens: %d, Output tokens: %d\n",
+			anthropicResponse.Usage.InputTokens,
+			anthropicResponse.Usage.OutputTokens)
 		fmt.Println("-------------------------")
 	}
 
-	// Return the raw content from the first choice
+	// Return the raw content
 	return content, nil
 }
 
 // CallString calls the API and returns the raw string response.
-func (c *OpenAIClient) CallString(prompt string, input interface{}) (string, error) {
+func (c *AnthropicClient) CallString(prompt string, input interface{}) (string, error) {
 	return c.CallBase(prompt, input)
 }
 
 // CallArray calls the API and unmarshals the JSON response into a slice of type T.
-func (c *OpenAIClient) CallArray(prompt string, input interface{}, result interface{}) error {
+func (c *AnthropicClient) CallArray(prompt string, input interface{}, result interface{}) error {
 	content, err := c.CallBase(prompt, input)
 	if err != nil {
 		return err
@@ -314,7 +318,7 @@ func (c *OpenAIClient) CallArray(prompt string, input interface{}, result interf
 }
 
 // CallObject calls the API and unmarshals the JSON response into an object of type T.
-func (c *OpenAIClient) CallObject(prompt string, input interface{}, result interface{}) error {
+func (c *AnthropicClient) CallObject(prompt string, input interface{}, result interface{}) error {
 	content, err := c.CallBase(prompt, input)
 	if err != nil {
 		return err
