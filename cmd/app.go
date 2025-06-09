@@ -331,15 +331,15 @@ func (a *App) assignCallNames(components *AppComponents, callDetailsList []*util
 	var responses []CallNameResponse
 	var err error
 
-	// Try using templated client first, if available
-	if components.TemplatedClient != nil {
-		retryableCall := util.WithRetries(components.TemplatedClient.CallArrayWithTemplate, 3)
-		err = retryableCall("call_naming", nil, requests, &responses)
-	} else {
-		// Fall back to legacy approach with retries
-		retryableCall := util.WithRetries(components.OpenAIClient.CallArray, 3)
-		err = retryableCall(legacyCallNamingPrompt, requests, &responses)
+	// Check if templated client is available
+	if components.TemplatedClient == nil {
+		// Log deprecation warning
+		log.Println("WARNING: Templated client not available for call naming. This is required - legacy prompts have been removed.")
+		return fmt.Errorf("templated client is required for call naming operations - legacy prompts have been removed")
 	}
+
+	retryableCall := util.WithRetries(components.TemplatedClient.CallArrayWithTemplate, 3)
+	err = retryableCall("call_naming", nil, requests, &responses)
 
 	if err != nil {
 		return fmt.Errorf("error calling OpenAI for call names: %w", err)
@@ -357,64 +357,6 @@ func (a *App) assignCallNames(components *AppComponents, callDetailsList []*util
 
 	return nil
 }
-
-// Legacy prompt for backward compatibility
-const legacyCallNamingPrompt = `
-# Role and Objective
-You are an API endpoint naming specialist for Postman collections. Your task is to generate concise, descriptive names for API calls based on their URLs and sequence in a workflow.
-
-# Instructions
-For each API call in the provided list, create a clear, user-friendly name that accurately reflects the endpoint's purpose and its position in the sequence of API operations.
-
-## Naming Guidelines
-- Create concise yet descriptive names
-- Reflect both the endpoint's purpose and its order in the sequence
-- Ensure names are intuitive for users viewing the collection
-- Use consistent naming patterns for similar endpoints
-- For repeated calls to the same endpoint, you may use the same name if appropriate
-
-# Reasoning Steps
-1. Analyze the URL structure to identify the API resource or action
-2. Consider the sequence number to understand where this call fits in the workflow
-3. Extract meaningful parts from the URL path that indicate purpose
-4. Use domain knowledge of the API to inform naming choices
-5. Format the name to be concise but clear for end-users
-
-# Output Format
-Return an array of objects, with each object containing a "name" property. The response must be a raw JSON array with no commentary or additional formatting.
-
-# Examples
-## Example 1
-Input:
-[
-  {
-    "url": "https://api.example.com/v1/air/search",
-    "sequence": 1
-  },
-  {
-    "url": "https://api.example.com/v1/air/price",
-    "sequence": 2
-  }
-]
-
-Output:
-[
-  {
-    "name": "Air Search"
-  },
-  {
-    "name": "Air Price"
-  }
-]
-
-# Context
-This naming is part of a HAR to Postman Collection converter. The names you generate will be displayed in the Postman collection
-sidebar and will help users understand the purpose of each request in the workflow.
-
-# Final instructions
-Always provide a name for every call in the input list. There must be a 1:1 correspondence between the input array and output
-array and the ordering MUST be preserved. Return only the raw JSON array without any explanations or decorations.
-`
 
 // loadPredefinedVars loads predefined variables from a JSON file.
 // The file should contain a JSON array of objects with the following structure:

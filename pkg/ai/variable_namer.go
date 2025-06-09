@@ -129,11 +129,10 @@ func (vn *VariableNamer) AssignVariableNames(chainedValues []*util.ChainedValueC
 			// Use the template system
 			err = templatedClient.CallArrayWithTemplate("variable_naming", nil, variableNames, &results)
 		} else {
-			if verbose {
-				fmt.Println("Using legacy client for variable naming")
-			}
-			// Fall back to the legacy approach with embedded prompt
-			err = vn.Client.CallArray(legacyVariableNamingPrompt, variableNames, &results)
+			// Log deprecation warning
+			log.Println("WARNING: Using legacy client without template support. This is deprecated and will be removed in a future version.")
+			// For backward compatibility, return an error instead of using hardcoded prompt
+			return fmt.Errorf("templated client is required for variable naming operations - legacy prompts have been removed")
 		}
 
 		if err != nil {
@@ -180,74 +179,3 @@ func (vn *VariableNamer) AssignVariableNames(chainedValues []*util.ChainedValueC
 
 	return nil
 }
-
-// Legacy prompt for backward compatibility
-const legacyVariableNamingPrompt = `
-# Role and Objective
-You are a variable naming expert for API data extraction in Postman collections. Your task is to generate descriptive, best-practice variable names for values extracted from API responses.
-
-# Instructions
-Create meaningful variable names for values retrieved from API responses. These names will be used in a Postman collection to store values extracted from responses and used in subsequent requests.
-
-## Naming Conventions
-- Make each variable name descriptive and follow JavaScript naming best practices
-- Ensure all names are unique within the collection
-- Be concise but clear - avoid being overly verbose
-- Don't include generic terms like "identifier" or "value" unless critical to understanding
-- Focus on the most descriptive part as a human would naturally name it
-- If a proposed name is provided, use that as the variable name
-
-# Reasoning Steps
-1. Analyze the origin request URL to understand the API endpoint context
-2. Consider the JSON path to understand where in the response the value comes from
-3. Review the example value to understand the data type and content
-4. Check if a proposed name is already provided and use it if available
-5. Ensure the name is unique among all variables in the collection
-
-# Output Format
-Return an array of objects with a 1:1 correspondence to the input array. Each object should contain a "name" property with the variable name.
-The response must be a completely undecorated JSON array.
-
-# Examples
-## Example 1
-Input:
-[
-    {
-        "origin_request_url": "https://api.travelport.com/v1/air/flight",
-        "response_path": "$.data.flights[0].segments[0].departure_time",
-        "example_value": "2025-01-02",
-        "proposed_name": "departureTime"
-    },
-    {
-        "origin_request_url": "https://{{baseURL}}/11/air/book/airoffer/reservationworkbench/{{reservationValue}}/offers/buildfromcatalogproductoffering",
-        "response_path": "OfferListResponse.OfferID[0].Identifier.value",
-        "example_value": "o21"
-    },
-    {
-        "origin_request_url": "https://{{baseURL}}/11/air/book/reservation/reservations/{{confirmationLocator}}",
-        "response_path": "ReservationResponse.Reservation.Offer[0].Price.CurrencyCode.value",
-        "example_value": "USD"
-    }
-]
-
-Output:
-[
-    {
-        "name": "departureTime",
-    },
-	{
-		"name": "offerIdentifier",
-	},
-	{
-		"name": "reservationOfferCurrency",
-	}
-]
-
-# Context
-This naming task is part of a HAR to Postman Collection converter. The variable names you create will be used to replace hardcoded values in the
-collection with Postman environment variables, making the collection more dynamic and reusable.
-
-# Final instructions
-There must be a 1:1 correspondence between input and output arrays - every input must have a corresponding output. Return only raw JSON
-without any explanations or decorations.
-`
