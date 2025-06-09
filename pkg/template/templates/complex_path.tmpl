@@ -69,19 +69,19 @@ Given a JSON:
 If the usage path is: Documents[1].DocumentID and the *context* that it's used in is referring to a ticket number,
 the response should be like: jsonpath.query(responseJson, "Documents[?(@.DocumentType == 'TicketNumber')].DocumentID")
 
-## Example 3
-If working with a JSON that has multiple nested arrays that, based on the API responses, are somewhat interchangable,
-try to generate a path that is more stable and less dependent on the number of results returned.
+## Example 3: Index Normalization for Search Results
+CRITICAL: When working with search results or lists of similar items, ALWAYS use index [0] regardless of which item was selected.
 
-E.g. flight options:
+For example, if the user selected flight #3 from a list of flights:
+- Original path: flights[2].segments[3].departure
+- Normalized path: flights[0].segments[0].departure
 
-flights
- - flight 1
- - flight 2
- - flight 3
- - flight 4
+This ensures the path works even when:
+- Different searches return different numbers of results
+- The selected item doesn't exist in smaller result sets
+- The API returns results in different orders
 
-If the selected flight is #3, you can equivalently return the first (zero-indexed) flight. Apply the same logic to everything -- please use your judgement.
+Apply this rule to ALL search results: flights, hotels, products, services, etc. It can also apply multiple times in the same path.
 
 # Context
 This path generation is part of a HAR to Postman Collection converter system. The paths you create will be used in Postman test scripts to
