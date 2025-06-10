@@ -121,3 +121,28 @@ func (m *MockOpenAIClient) GetCalls() []MockCall {
 func (m *MockOpenAIClient) ClearCalls() {
 	m.CallHistory = []MockCall{}
 }
+
+// CallWithTemplate implements the TemplatedClientInterface for testing.
+func (m *MockOpenAIClient) CallWithTemplate(templateName string, templateData interface{}, input interface{}) (string, error) {
+	// For testing purposes, treat template calls the same as regular calls
+	// but use the template name as the prompt
+	return m.CallBase(templateName, input)
+}
+
+// CallArrayWithTemplate implements the TemplatedClientInterface for testing.
+func (m *MockOpenAIClient) CallArrayWithTemplate(templateName string, templateData interface{}, input interface{}, result interface{}) error {
+	response, err := m.CallBase(templateName, input)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(response), result)
+}
+
+// CallObjectWithTemplate implements the TemplatedClientInterface for testing.
+func (m *MockOpenAIClient) CallObjectWithTemplate(templateName string, templateData interface{}, input interface{}, result interface{}) error {
+	response, err := m.CallBase(templateName, input)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal([]byte(response), result)
+}

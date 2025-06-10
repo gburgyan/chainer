@@ -27,6 +27,8 @@ type Config struct {
 	// Proxy-related fields
 	ProxyPort  int
 	RecordPath string
+	// Mode selection
+	Mode string // "har", "proxy", or "" (auto-detect)
 }
 
 // App is the main application struct.
@@ -46,13 +48,21 @@ func NewApp(config *Config) *App {
 // 1. HAR Processing Mode: Processes an existing HAR file to create a Postman collection
 // 2. Proxy Mode: Starts a proxy server to capture HTTP traffic and optionally create a collection
 func (a *App) Run() error {
-	// Check if we're in proxy mode
-	if a.Config.ProxyPort > 0 {
+	// Use explicit mode if specified
+	switch a.Config.Mode {
+	case "proxy":
 		return a.runProxyMode()
+	case "har":
+		return a.runHARMode()
+	case "":
+		// Auto-detect mode based on configuration
+		if a.Config.ProxyPort > 0 {
+			return a.runProxyMode()
+		}
+		return a.runHARMode()
+	default:
+		return fmt.Errorf("invalid mode: %s (must be 'har', 'proxy', or empty for auto-detect)", a.Config.Mode)
 	}
-
-	// Otherwise, run in HAR processing mode
-	return a.runHARMode()
 }
 
 // runHARMode executes the HAR processing flow.
@@ -393,6 +403,7 @@ type YAMLConfig struct {
 	HarFile  string `yaml:"har_file"`
 	VarsFile string `yaml:"vars_file"`
 	Output   string `yaml:"output"`
+	Mode     string `yaml:"mode"` // "har", "proxy", or "" (auto-detect)
 	AI       struct {
 		Provider           string  `yaml:"provider"`
 		APIKey             string  `yaml:"api_key"`
@@ -423,6 +434,8 @@ func ParseFlags() (*Config, error) {
 	// Proxy-related flags
 	proxyPort := flag.Int("proxy", 0, "Start proxy server on specified port (e.g., 8080)")
 	recordPath := flag.String("record", "", "Record proxy traffic to HAR file at specified path")
+	// Mode selection flag
+	mode := flag.String("mode", "", "Explicitly set mode: 'har' or 'proxy' (auto-detects if not specified)")
 
 	flag.Parse()
 
@@ -458,6 +471,7 @@ func ParseFlags() (*Config, error) {
 			HarFilePath:  yamlConfig.HarFile,
 			VarsFilePath: yamlConfig.VarsFile,
 			OutputPath:   yamlConfig.Output,
+			Mode:         yamlConfig.Mode,
 			AIConfig:     aiConfig,
 			ProxyPort:    yamlConfig.Proxy.Port,
 			RecordPath:   yamlConfig.Proxy.Record,
@@ -498,21 +512,42 @@ func ParseFlags() (*Config, error) {
 	if *recordPath != "" {
 		config.RecordPath = *recordPath
 	}
+	if *mode != "" {
+		config.Mode = *mode
+	}
 
 	// Validate based on mode
-	if config.ProxyPort > 0 {
+	effectiveMode := config.Mode
+	if effectiveMode == "" {
+		// Auto-detect mode
+		if config.ProxyPort > 0 {
+			effectiveMode = "proxy"
+		} else {
+			effectiveMode = "har"
+		}
+	}
+
+	switch effectiveMode {
+	case "proxy":
 		// Proxy mode - no additional validation needed
-	} else {
+		if config.ProxyPort == 0 {
+			return nil, errors.New("proxy mode requires -proxy flag or proxy.port in config")
+		}
+	case "har":
 		// HAR processing mode validation
 		if config.HarFilePath == "" {
 			usage := `Usage:
   # HAR Processing Mode:
-  chainer -config=<path_to_config_file>
+  chainer -config=<path_to_config_file> [-mode=har|proxy]
   chainer -file=<path_to_har_file> [-vars=<path_to_vars_file>] [-output=collection.json] [-verbose]
-          [-provider=openai|anthropic] [-model=<model_name>]
+          [-provider=openai|anthropic] [-model=<model_name>] [-mode=har|proxy]
 
   # Proxy Mode (acts as a general HTTP/HTTPS forward proxy):
-  chainer -proxy=<port> [-record=<har_file>] [-output=collection.json]
+  chainer -proxy=<port> [-record=<har_file>] [-output=collection.json] [-mode=har|proxy]
+  
+  # Using -mode flag to override config file:
+  chainer -config=<path_to_config_file> -mode=proxy  # Force proxy mode
+  chainer -config=<path_to_config_file> -mode=har    # Force HAR mode
 
   AI Providers:
     OpenAI: Set OPENAI_API_KEY environment variable
@@ -520,6 +555,7 @@ func ParseFlags() (*Config, error) {
     Auto-detection: If provider not specified, will detect based on available API keys
 
 Example config file:
+  mode: "har"  # or "proxy", or omit for auto-detection
   har_file: "path/to/your.har"
   output: "collection.json"
   ai:
@@ -534,6 +570,8 @@ Example config file:
 			fmt.Println(usage)
 			return nil, errors.New("missing HAR file path or proxy configuration")
 		}
+	default:
+		return nil, fmt.Errorf("invalid mode: %s (must be 'har' or 'proxy')", effectiveMode)
 	}
 
 	return config, nil

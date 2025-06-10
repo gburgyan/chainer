@@ -121,16 +121,11 @@ func (p *ComplexPathProcessor) UpdateComplexPaths(values []*util.ChainedValueCon
 
 		// Check if we have a templated client
 		if templatedClient, ok := p.Client.(TemplatedClientInterface); ok {
-			// Try enhanced template first, fall back to basic
 			var pathErr error
 			newPath, pathErr = templatedClient.CallWithTemplate("complex_path_v2", nil, input)
 			if pathErr != nil {
-				// Fall back to basic template
-				newPath, pathErr = templatedClient.CallWithTemplate("complex_path", nil, input)
-				if pathErr != nil {
-					log.Printf("UpdateComplexPaths: error calling AI for path: %v", pathErr)
-					continue
-				}
+				log.Printf("UpdateComplexPaths: error calling AI for path: %v", pathErr)
+				continue
 			}
 		} else {
 			// Log deprecation warning
@@ -233,68 +228,176 @@ func navigateToParent(data interface{}, tokens []string) map[string]interface{} 
 
 // smartPruneJSON intelligently prunes JSON while preserving structure
 func smartPruneJSON(data interface{}, targetPath []string) interface{} {
-	// For now, we'll use the line-based approach but with better structure preservation
-	// In a production version, this would implement sophisticated pruning that:
+	// Sophisticated pruning that:
 	// 1. Keeps the full path to the target
 	// 2. Preserves array structure (first, last, and elements around target)
 	// 3. Keeps sibling fields at each level
 	// 4. Truncates deep nested structures not on the path
 
-	// Convert to pretty JSON and extract context
-	jsonBytes, err := json.MarshalIndent(data, "", "  ")
+	// Clone the data structure
+	copiedBytes, err := json.Marshal(data)
 	if err != nil {
 		return data
 	}
+	var pruned interface{}
+	if err := json.Unmarshal(copiedBytes, &pruned); err != nil {
+		return data
+	}
 
-	jsonStr := string(jsonBytes)
-	lines := strings.Split(jsonStr, "\n")
+	// Prune the structure while preserving the path
+	pruneRecursively(pruned, targetPath, 0, true)
 
-	// Find the marker
-	markerLine := -1
-	for i, line := range lines {
-		if strings.Contains(line, ">>NODE-TO-GET<<") || strings.Contains(line, "\\u003e\\u003eNODE-TO-GET\\u003c\\u003c") {
-			markerLine = i
-			break
+	return pruned
+}
+
+// pruneRecursively performs the actual pruning recursively
+func pruneRecursively(data interface{}, targetPath []string, currentDepth int, onPath bool) {
+	if currentDepth >= len(targetPath) {
+		// We've reached or passed the target depth
+		return
+	}
+
+	token := targetPath[currentDepth]
+	key, idx, isArray, _ := parseArrayKey(token)
+
+	switch v := data.(type) {
+	case map[string]interface{}:
+		// For objects, keep siblings at each level on the path
+		if onPath {
+			// Process the target key
+			if isArray && key != "" {
+				if arr, ok := v[key].([]interface{}); ok {
+					pruneArray(arr, targetPath, currentDepth, idx)
+					v[key] = arr
+				}
+			} else if !isArray {
+				if child, ok := v[token]; ok {
+					pruneRecursively(child, targetPath, currentDepth+1, true)
+				}
+			}
+
+			// Keep sibling fields but prune their contents if not on path
+			for k, val := range v {
+				if k != token && k != key {
+					pruneDeepStructure(val, 2) // Keep 2 levels of structure for siblings
+				}
+			}
+		} else {
+			// Not on path - prune deeply
+			pruneDeepStructure(v, 1)
+		}
+
+	case []interface{}:
+		if onPath && currentDepth < len(targetPath) {
+			_, targetIdx, targetIsArray, _ := parseArrayKey(targetPath[currentDepth])
+			if targetIsArray && targetIdx >= 0 && targetIdx < len(v) {
+				// Keep the target element and prune others
+				pruneArray(v, targetPath, currentDepth, targetIdx)
+			}
+		} else {
+			// Not on path - keep first and last elements only
+			if len(v) > 3 {
+				kept := []interface{}{v[0]}
+				if len(v) > 1 {
+					kept = append(kept, "... "+fmt.Sprintf("%d items omitted", len(v)-2)+" ...")
+					kept = append(kept, v[len(v)-1])
+				}
+				// Clear the array and add kept elements
+				for i := range v {
+					if i < len(kept) {
+						v[i] = kept[i]
+					} else {
+						v[i] = nil
+					}
+				}
+				// Resize
+				v = v[:len(kept)]
+			}
 		}
 	}
+}
 
-	if markerLine == -1 {
-		return data
+// pruneArray intelligently prunes array elements
+func pruneArray(arr []interface{}, targetPath []string, currentDepth int, targetIdx int) {
+	if targetIdx < 0 || targetIdx >= len(arr) {
+		return
 	}
 
-	// Extract with better context - more lines and structure-aware
-	contextLines := 30 // More context
-	startLine := markerLine - contextLines
-	if startLine < 0 {
-		startLine = 0
-	}
-	endLine := markerLine + contextLines + 1
-	if endLine > len(lines) {
-		endLine = len(lines)
+	// Always keep first and last elements
+	keepIndices := map[int]bool{
+		0:            true,
+		len(arr) - 1: true,
+		targetIdx:    true,
 	}
 
-	// Ensure we have complete JSON structure
-	// Find the nearest opening brace/bracket before start
-	for startLine > 0 && !strings.Contains(lines[startLine], "{") && !strings.Contains(lines[startLine], "[") {
-		startLine--
+	// Keep elements around the target (context window of 1)
+	if targetIdx > 0 {
+		keepIndices[targetIdx-1] = true
+	}
+	if targetIdx < len(arr)-1 {
+		keepIndices[targetIdx+1] = true
 	}
 
-	// Find the nearest closing brace/bracket after end
-	for endLine < len(lines)-1 && !strings.Contains(lines[endLine-1], "}") && !strings.Contains(lines[endLine-1], "]") {
-		endLine++
+	// Process each element
+	for i, elem := range arr {
+		if keepIndices[i] {
+			if i == targetIdx {
+				// Recurse on the target element
+				pruneRecursively(elem, targetPath, currentDepth+1, true)
+			} else {
+				// Prune non-target elements more aggressively
+				pruneDeepStructure(elem, 1)
+			}
+		} else {
+			// Replace with placeholder
+			arr[i] = fmt.Sprintf("... item %d ...", i)
+		}
+	}
+}
+
+// pruneDeepStructure truncates deep nested structures
+func pruneDeepStructure(data interface{}, maxDepth int) {
+	if maxDepth <= 0 {
+		return
 	}
 
-	partialLines := lines[startLine:endLine]
-	partialJSON := strings.Join(partialLines, "\n")
+	switch v := data.(type) {
+	case map[string]interface{}:
+		for key, val := range v {
+			switch child := val.(type) {
+			case map[string]interface{}, []interface{}:
+				if maxDepth > 1 {
+					pruneDeepStructure(child, maxDepth-1)
+				} else {
+					// Replace deep structures with placeholders
+					if _, ok := child.(map[string]interface{}); ok {
+						v[key] = "{...}"
+					} else {
+						v[key] = "[...]"
+					}
+				}
+			}
+			// Keep primitive values as-is
+		}
 
-	// Try to parse it back to ensure it's valid JSON
-	var result interface{}
-	if err := json.Unmarshal([]byte(partialJSON), &result); err != nil {
-		// If it's not valid, return the original pruned version
-		return data
+	case []interface{}:
+		for i, elem := range v {
+			switch child := elem.(type) {
+			case map[string]interface{}, []interface{}:
+				if maxDepth > 1 {
+					pruneDeepStructure(child, maxDepth-1)
+				} else {
+					// Replace deep structures with placeholders
+					if _, ok := child.(map[string]interface{}); ok {
+						v[i] = "{...}"
+					} else {
+						v[i] = "[...]"
+					}
+				}
+			}
+			// Keep primitive values as-is
+		}
 	}
-
-	return result
 }
 
 // detectValueType analyzes a value and returns its type

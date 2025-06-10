@@ -1,6 +1,14 @@
 # Chainer Configuration File
 # This file configures the HAR to Postman Collection converter
 
+# Operating mode selection (optional)
+# Options: "har", "proxy", or "" (auto-detect based on configuration)
+# - "har": Process HAR files to create Postman collections
+# - "proxy": Run as HTTP/HTTPS proxy server to capture traffic
+# - "" or omitted: Auto-detect mode based on proxy.port setting
+# Can be overridden with -mode command-line flag
+mode: ""
+
 # Path to the HAR (HTTP Archive) file to process
 # This file contains captured HTTP traffic that will be analyzed
 # to create a Postman collection with automatic variable extraction
@@ -16,17 +24,27 @@ vars_file: ""
 # Default: collection.json
 output: "collection.json"
 
-# OpenAI API configuration
+# AI Provider configuration
 ai:
-  # OpenAI API key (required)
-  # Can also be set via OPENAI_API_KEY environment variable
+  # AI provider to use
+  # Options: openai, anthropic
+  # If not specified, auto-detects based on available API keys
+  provider: ""
+  
+  # API key for the AI provider
+  # Can also be set via environment variables:
+  #   - OPENAI_API_KEY for OpenAI
+  #   - ANTHROPIC_API_KEY for Anthropic
   # Environment variable takes precedence over this setting
   api_key: ""
   
   # Model to use for AI operations
-  # Default: gpt-4
-  # Options: gpt-4, gpt-4-turbo-preview, gpt-3.5-turbo
-  model: "gpt-4"
+  # Default depends on provider:
+  #   - OpenAI: gpt-4
+  #   - Anthropic: claude-3-haiku-20240307
+  # OpenAI models: gpt-4, gpt-4-turbo-preview, gpt-3.5-turbo
+  # Anthropic models: claude-3-opus-20240229, claude-3-sonnet-20240229, claude-3-haiku-20240307
+  model: ""
   
   # Maximum tokens for AI responses
   # Default: 4096
@@ -41,13 +59,53 @@ ai:
   # Useful for debugging AI interactions
   # Default: false
   verbose: false
+  
+  # Enable complex JSON path refinement
+  # Uses AI to create more stable paths for value extraction
+  # Default: false
+  refine_complex_paths: false
+
+# Proxy server configuration (optional)
+# When proxy mode is enabled, chainer acts as an HTTP/HTTPS forward proxy
+# that can capture and record API traffic for later processing
+proxy:
+  # Port number for the proxy server
+  # Set to 0 or omit to disable proxy mode
+  # Example: 8080
+  port: 0
+  
+  # Path to save the recorded HAR file
+  # If specified, all proxied traffic will be recorded
+  # The HAR file can then be processed to create a Postman collection
+  record: ""
 
 # Example usage:
 # 1. Copy this file and name it according to your project
-# 2. Fill in the required fields (har_file and ai.api_key)
+# 2. Fill in the required fields (har_file and AI configuration)
 # 3. Run: chainer -config=your-config.yaml
 #
-# Minimal example:
+# OpenAI example:
 # har_file: "path/to/your.har"
 # ai:
+#   provider: "openai"
 #   api_key: "sk-your-openai-api-key"
+#   model: "gpt-4"
+#
+# Anthropic example:
+# har_file: "path/to/your.har"
+# ai:
+#   provider: "anthropic"
+#   api_key: "sk-ant-your-anthropic-api-key"
+#   model: "claude-3-haiku-20240307"
+#
+# Auto-detection example (uses environment variables):
+# har_file: "path/to/your.har"
+# output: "my-collection.json"
+# ai:
+#   verbose: true
+#
+# Proxy mode example:
+# proxy:
+#   port: 8080
+#   record: "capture.har"
+# output: "proxy-collection.json"
